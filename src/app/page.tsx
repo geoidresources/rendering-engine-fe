@@ -2,14 +2,15 @@
 
 import dynamic from "next/dynamic";
 
-const CesiumViewer = dynamic(() => import("@/components/CesiumViewer"), {
+// Dynamically import the new Viewer component with SSR disabled
+const Viewer = dynamic(() => import("@/components/Viewer"), {
   ssr: false,
 });
 
 export default function Home() {
   return (
-    <main className="w-full h-screen">
-      <CesiumViewer />
+    <main className="w-full h-screen m-0 p-0 overflow-hidden">
+      <Viewer />
     </main>
   );
 }

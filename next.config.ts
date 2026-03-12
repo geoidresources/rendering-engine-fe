@@ -3,9 +3,10 @@ import CopyWebpackPlugin from "copy-webpack-plugin";
 import path from "path";
 
 const nextConfig: NextConfig = {
+  reactStrictMode: false,
   reactCompiler: true,
-  turbopack: {},
-  webpack: (config, { isServer, webpack }) => {
+  // turbopack: {}, // Disabled Turbopack due to panic with CopyWebpackPlugin
+  webpack: (config, { webpack }) => {
     config.plugins.push(
       new CopyWebpackPlugin({
         patterns: [

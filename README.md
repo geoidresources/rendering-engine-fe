@@ -1,5 +1,39 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Propeller-Style Viewer Data Contract
+
+This viewer expects static geospatial assets to be placed in the `public/data/` directory.
+
+### Expected Folder Structure
+
+```text
+public/
+  data/
+    tiles/
+      {z}/
+        {x}/
+          {y}.png       # Orthomosaic XYZ tiles (from gdal2tiles)
+    pointcloud/
+      data.laz          # LAZ point cloud file
+    dsm/                # DSM elevation artifacts (placeholder)
+    polygons.geojson    # GeoJSON vector data for regions of interest
+```
+
+### Asset Conversion Guide
+
+**For GeoTIFF Orthomosaic:**
+```bash
+brew install gdal
+gdal_translate -co COMPRESS=DEFLATE ortho.tif ortho-cog.tif
+gdal2tiles.py -z 16-20 -w webmerc ortho-cog.tif public/data/tiles/
+```
+
+**For LAZ Point Cloud:**
+Place the `.laz` file directly at `public/data/pointcloud/data.laz`.
+
+**For Polygons:**
+Place the GeoJSON file directly at `public/data/polygons.geojson`.
+
 ## Getting Started
 
 First, run the development server:
