@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 
 export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons';
+export type TerrainMode = 'dtm' | 'dsm';
 
 export interface LayerState {
   id: LayerId;
@@ -18,6 +19,10 @@ export interface ViewerState {
   setLayerOpacity: (id: LayerId, opacity: number) => void;
   setLayerLoading: (id: LayerId, loading: boolean) => void;
   setLayerError: (id: LayerId, error: string | null) => void;
+
+  // Terrain source
+  terrainMode: TerrainMode;
+  setTerrainMode: (mode: TerrainMode) => void;
 
   // Selection
   selectedFeature: Record<string, unknown> | null;
@@ -42,13 +47,14 @@ export interface ViewerState {
 
 const initialLayers: Record<LayerId, LayerState> = {
   ortho: { id: 'ortho', name: 'Orthomosaic', visible: true, opacity: 1, loading: false, error: null },
-  dsm: { id: 'dsm', name: 'DSM (Elevation)', visible: false, opacity: 0.8, loading: false, error: null },
+  dsm: { id: 'dsm', name: 'Terrain', visible: false, opacity: 0.8, loading: false, error: null },
   laz: { id: 'laz', name: 'Point Cloud', visible: true, opacity: 1, loading: false, error: null },
-  polygons: { id: 'polygons', name: 'Regions of Interest', visible: true, opacity: 0.5, loading: false, error: null },
+  polygons: { id: 'polygons', name: 'Regions of Interest', visible: false, opacity: 0.5, loading: false, error: null },
 };
 
 export const useViewerStore = create<ViewerState>((set) => ({
   layers: initialLayers,
+  terrainMode: 'dtm',
   
   setLayerVisibility: (id, visible) =>
     set((state) => ({
@@ -82,14 +88,16 @@ export const useViewerStore = create<ViewerState>((set) => ({
       },
     })),
 
+  setTerrainMode: (mode) => set({ terrainMode: mode }),
+
   selectedFeature: null,
   setSelectedFeature: (feature) => set({ selectedFeature: feature }),
 
   viewState: {
-    longitude: 0,
-    latitude: 0,
-    zoom: 16,
-    pitch: 45,
+    longitude: 152.414949,
+    latitude: -32.062341,
+    zoom: 15,
+    pitch: 30,
     bearing: 0,
   },
   setViewState: (viewState) => set({ viewState }),
