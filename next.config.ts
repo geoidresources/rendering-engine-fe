@@ -1,38 +1,52 @@
 import type { NextConfig } from "next";
 import CopyWebpackPlugin from "copy-webpack-plugin";
 import path from "path";
+import webpack from "webpack";
+
+const cesiumSource = "node_modules/cesium/Build/Cesium";
+const cesiumBaseUrl = "cesiumStatic";
+// Copy into public/ so files are served at /cesiumStatic/* (not under _next/static).
+const publicCesiumDir = path.resolve("public", cesiumBaseUrl);
 
 const nextConfig: NextConfig = {
-  reactCompiler: true,
-  turbopack: {},
-  webpack: (config, { isServer, webpack }) => {
-    config.plugins.push(
-      new CopyWebpackPlugin({
-        patterns: [
-          {
-            from: path.join(__dirname, "node_modules/cesium/Build/Cesium/Workers"),
-            to: path.join(__dirname, "public/cesium/Workers"),
-          },
-          {
-            from: path.join(__dirname, "node_modules/cesium/Build/Cesium/ThirdParty"),
-            to: path.join(__dirname, "public/cesium/ThirdParty"),
-          },
-          {
-            from: path.join(__dirname, "node_modules/cesium/Build/Cesium/Assets"),
-            to: path.join(__dirname, "public/cesium/Assets"),
-          },
-          {
-            from: path.join(__dirname, "node_modules/cesium/Build/Cesium/Widgets"),
-            to: path.join(__dirname, "public/cesium/Widgets"),
-          },
-        ],
-      })
-    );
-    config.plugins.push(
-      new webpack.DefinePlugin({
-        CESIUM_BASE_URL: JSON.stringify("/cesium"),
-      })
-    );
+  reactStrictMode: false,
+  reactCompiler: false,
+  // Do NOT use transpilePackages for cesium or resium (pnpm + CJS/ESM issues).
+  async redirects() {
+    return [
+      { source: "/", destination: "/login", permanent: false },
+      { source: "/GEOIDRESOURCES", destination: "/login", permanent: false },
+    ];
+  },
+  webpack(config, { isServer }) {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      cesium: path.resolve("node_modules/cesium/Source/Cesium.js"),
+      resium: path.resolve("node_modules/resium/dist/resium.umd.cjs"),
+    };
+
+    if (!isServer) {
+      config.plugins.push(
+        new CopyWebpackPlugin({
+          patterns: [
+            { from: path.join(cesiumSource, "Workers"), to: path.join(publicCesiumDir, "Workers") },
+            { from: path.join(cesiumSource, "ThirdParty"), to: path.join(publicCesiumDir, "ThirdParty") },
+            { from: path.join(cesiumSource, "Assets"), to: path.join(publicCesiumDir, "Assets") },
+            { from: path.join(cesiumSource, "Widgets"), to: path.join(publicCesiumDir, "Widgets") },
+          ],
+        })
+      );
+      config.plugins.push(
+        new webpack.DefinePlugin({
+          CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}`),
+        })
+      );
+    }
+
+    config.module.unknownContextCritical = false;
+    config.module.unknownContextRegExp =
+      /\/cesium\/cesium\/Source\/Core\/buildModuleUrl\.js/;
+
     return config;
   },
 };

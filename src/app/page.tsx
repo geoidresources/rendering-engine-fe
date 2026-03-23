@@ -1,15 +1,5 @@
-"use client";
-
-import dynamic from "next/dynamic";
-
-const CesiumViewer = dynamic(() => import("@/components/CesiumViewer"), {
-  ssr: false,
-});
+import { redirect } from "next/navigation";
 
 export default function Home() {
-  return (
-    <main className="w-full h-screen">
-      <CesiumViewer />
-    </main>
-  );
+  redirect("/login");
 }

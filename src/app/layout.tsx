@@ -24,6 +24,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
+      <head>
+        {/* Bypass PostCSS @import issues; CopyWebpackPlugin copies this to public */}
+        <link rel="stylesheet" href="/cesiumStatic/Widgets/widgets.css" />
+      </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
