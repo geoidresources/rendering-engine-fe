@@ -16,6 +16,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/", destination: "/login", permanent: false },
       { source: "/GEOIDRESOURCES", destination: "/login", permanent: false },
+      { source: "/GEOIDRESOURCES/:path*", destination: "/login", permanent: false },
     ];
   },
   webpack(config, { isServer }) {
