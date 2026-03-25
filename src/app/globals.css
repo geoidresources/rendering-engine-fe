@@ -1,8 +1,28 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
+/* Critical Cesium canvas sizing (inlined so Tailwind/PostCSS cannot drop it).
+   Full widgets.css is linked from layout.tsx. */
+.cesium-widget {
+  overflow: hidden;
+  display: block;
+  position: relative;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+.cesium-widget,
+.cesium-widget canvas {
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
 :root {
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: #09090b;
 }
 
 @theme inline {
@@ -12,11 +32,15 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
 }
 
 body {
