@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 import CopyWebpackPlugin from "copy-webpack-plugin";
 import path from "path";
-import webpack from "webpack";
 
 const cesiumSource = "node_modules/cesium/Build/Cesium";
 const cesiumBaseUrl = "cesiumStatic";
@@ -19,7 +18,7 @@ const nextConfig: NextConfig = {
       { source: "/GEOIDRESOURCES/:path*", destination: "/login", permanent: false },
     ];
   },
-  webpack(config, { isServer }) {
+  webpack(config, { isServer, webpack: webpackApi }) {
     config.resolve.alias = {
       ...config.resolve.alias,
       cesium: path.resolve("node_modules/cesium/Source/Cesium.js"),
@@ -38,7 +37,7 @@ const nextConfig: NextConfig = {
         })
       );
       config.plugins.push(
-        new webpack.DefinePlugin({
+        new webpackApi.DefinePlugin({
           CESIUM_BASE_URL: JSON.stringify(`/${cesiumBaseUrl}`),
         })
       );
