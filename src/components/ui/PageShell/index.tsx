@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Button } from "@heroui/react";
+import AppButton from "@/components/ui/AppButton";
 
 interface PageShellProps {
   title: string;
@@ -26,12 +26,13 @@ export default function PageShell({ title, description, action, children }: Page
         </div>
         {action && (
           <Link href={action.href}>
-            <Button
+            <AppButton
               size="sm"
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium shrink-0"
+              variant="primary"
+              className="text-xs font-semibold px-4"
             >
               {action.label}
-            </Button>
+            </AppButton>
           </Link>
         )}
       </div>

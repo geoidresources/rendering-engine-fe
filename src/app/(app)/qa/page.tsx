@@ -1,3 +1,5 @@
+"use client";
+
 import PageShell from "@/components/ui/PageShell";
 
 export default function QAPage() {

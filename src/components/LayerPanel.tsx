@@ -11,38 +11,81 @@ export const LayerPanel: React.FC = () => {
     setPointBudget,
     terrainExaggeration,
     setTerrainExaggeration,
+    blendPreset,
+    setBlendPreset,
   } = useViewerStore();
 
   return (
-    <div className="w-72 bg-white/95 backdrop-blur-sm border-r border-gray-200 h-full flex flex-col shadow-lg z-10">
-      <div className="p-4 border-b border-gray-200 flex items-center gap-2">
-        <Layers className="w-5 h-5 text-gray-600" />
-        <h2 className="font-semibold text-gray-800">Workspace</h2>
+    <div className="w-72 h-full flex flex-col z-10 border-r border-zinc-200/70 dark:border-zinc-800/70 bg-white/80 dark:bg-zinc-950/75 backdrop-blur-xl shadow-xl shadow-black/10 dark:shadow-black/30">
+      <div className="p-4 border-b border-zinc-200/70 dark:border-zinc-800/70 flex items-center gap-2">
+        <Layers className="w-5 h-5 text-zinc-600 dark:text-zinc-300" />
+        <h2 className="font-semibold text-zinc-900 dark:text-white tracking-tight">Workspace</h2>
       </div>
 
-      <p className="px-4 pt-2 text-[11px] text-gray-500 leading-snug">
+      <p className="px-4 pt-2 text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug">
         DTM/DSM in the top bar switch quantized-mesh terrain. Layer toggles add ortho, points, vectors, and models.
       </p>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        <div className="rounded-xl p-3 border border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50/80 dark:bg-zinc-900/50">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-medium text-zinc-800 dark:text-zinc-100">Blend</h3>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-snug">
+                Switch between the original stack and a more integrated scene look.
+              </p>
+            </div>
+            <div
+              className="inline-flex rounded-xl border border-zinc-200/70 dark:border-zinc-800/70 bg-white/80 dark:bg-zinc-950/60 p-0.5"
+              role="tablist"
+              aria-label="Layer blend preset"
+            >
+              {(['stacked', 'embedded'] as const).map((preset) => {
+                const active = blendPreset === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setBlendPreset(preset)}
+                    className={
+                      active
+                        ? 'rounded-lg px-2.5 py-1 text-xs font-semibold bg-blue-600 dark:bg-blue-500 text-white shadow-sm'
+                        : 'rounded-lg px-2.5 py-1 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100/80 dark:hover:bg-zinc-800/60'
+                    }
+                  >
+                    {preset === 'stacked' ? 'Stacked' : 'Embedded'}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
         {(Object.keys(layers) as LayerId[]).map((id) => {
           const layer = layers[id];
           const opacityLocked = !layer.visible;
           return (
-            <div key={id} className="bg-gray-50 rounded-lg p-3 border border-gray-100">
+            <div
+              key={id}
+              className="rounded-xl p-3 border border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50/80 dark:bg-zinc-900/50"
+            >
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm text-gray-700">{layer.name}</span>
+                  <span className="font-medium text-sm text-zinc-800 dark:text-zinc-100">
+                    {layer.name}
+                  </span>
                   {layer.loading && <Loader2 className="w-3 h-3 text-blue-500 animate-spin" />}
                   {layer.error && (
                     <span title={layer.error}>
-                      <AlertCircle className="w-3 h-3 text-red-500" />
+                      <AlertCircle className="w-3 h-3 text-red-500 dark:text-red-400" />
                     </span>
                   )}
                 </div>
                 <button
                   onClick={() => setLayerVisibility(id, !layer.visible)}
-                  className="text-gray-500 hover:text-gray-700 transition-colors"
+                  className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
                   title={`Toggle visibility for ${layer.name}`}
                   aria-label={`Toggle visibility for ${layer.name}`}
                   type="button"
@@ -52,7 +95,10 @@ export const LayerPanel: React.FC = () => {
               </div>
 
               {layer.error && (
-                <p className="text-[11px] text-red-600 mb-2 leading-snug" role="alert">
+                <p
+                  className="text-[11px] text-red-600 dark:text-red-400 mb-2 leading-snug"
+                  role="alert"
+                >
                   {layer.error}
                 </p>
               )}
@@ -70,10 +116,10 @@ export const LayerPanel: React.FC = () => {
                 }
               >
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-12">Opacity</span>
+                  <span className="text-xs text-zinc-400 dark:text-zinc-500 w-12">Opacity</span>
                   {opacityLocked ? (
                     <div
-                      className="flex-1 flex items-center h-6 text-xs text-gray-500"
+                      className="flex-1 flex items-center h-6 text-xs text-zinc-500 dark:text-zinc-400"
                       aria-hidden
                     >
                       {Math.round(layer.opacity * 100)}% (locked)
@@ -91,10 +137,10 @@ export const LayerPanel: React.FC = () => {
                       aria-valuenow={layer.opacity}
                       aria-valuemin={0}
                       aria-valuemax={1}
-                      className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                      className="flex-1 h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:accent-blue-400"
                     />
                   )}
-                  <span className="text-xs text-gray-500 w-8 text-right">
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400 w-8 text-right">
                     {Math.round(layer.opacity * 100)}%
                   </span>
                 </div>
@@ -103,20 +149,24 @@ export const LayerPanel: React.FC = () => {
           );
         })}
 
-        <div className="mt-6 pt-4 border-t border-gray-200">
+        <div className="mt-6 pt-4 border-t border-zinc-200/70 dark:border-zinc-800/70">
           <div className="flex items-center gap-2 mb-4">
-            <Settings2 className="w-4 h-4 text-gray-600" />
-            <h3 className="text-sm font-semibold text-gray-800">Performance & Display</h3>
+            <Settings2 className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
+            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Performance & Display</h3>
           </div>
 
           <div className="space-y-4">
             <div
-              className="bg-gray-50 rounded-lg p-3 border border-gray-100"
+              className="rounded-xl p-3 border border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50/80 dark:bg-zinc-900/50"
               title="Higher budget uses lower screen-space error and a larger tile cache so more point tiles stay loaded (uses more GPU memory)."
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-700">Point budget</span>
-                <span className="text-xs text-gray-500">{(pointBudget / 1_000_000).toFixed(1)}M</span>
+                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-100">
+                  Point budget
+                </span>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {(pointBudget / 1_000_000).toFixed(1)}M
+                </span>
               </div>
               <input
                 type="range"
@@ -133,17 +183,21 @@ export const LayerPanel: React.FC = () => {
                 aria-valuenow={pointBudget}
                 aria-valuemin={100_000}
                 aria-valuemax={10_000_000}
-                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:accent-blue-400"
               />
             </div>
 
             <div
-              className="bg-gray-50 rounded-lg p-3 border border-gray-100"
+              className="rounded-xl p-3 border border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50/80 dark:bg-zinc-900/50"
               title="Scales terrain height relative to the ellipsoid. Values above 1× make relief easier to see on flat sites."
             >
               <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-700">Terrain exaggeration</span>
-                <span className="text-xs text-gray-500">{terrainExaggeration}x</span>
+                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-100">
+                  Terrain exaggeration
+                </span>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400">
+                  {terrainExaggeration}x
+                </span>
               </div>
               <input
                 type="range"
@@ -156,7 +210,7 @@ export const LayerPanel: React.FC = () => {
                 aria-valuenow={terrainExaggeration}
                 aria-valuemin={1}
                 aria-valuemax={5}
-                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:accent-blue-400"
               />
             </div>
           </div>

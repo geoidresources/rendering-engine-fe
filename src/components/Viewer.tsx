@@ -20,6 +20,7 @@ import {
   UrlTemplateImageryProvider,
   CesiumTerrainProvider,
   Cartesian3,
+  Cartesian2,
   Math as CesiumMath,
   Color,
   Rectangle,
@@ -38,12 +39,19 @@ import {
   Matrix4,
   BoundingSphere,
   Model as CesiumModel,
+  CallbackProperty,
+  CallbackPositionProperty,
+  PolygonHierarchy,
+  LabelStyle,
+  VerticalOrigin,
+  EllipsoidGeodesic,
 } from 'cesium';
 
 import { useViewerStore } from '../store/viewerStore';
 import { LayerPanel } from './LayerPanel';
 import { Toolbar } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
+import { fetchMockAreaDetails } from '../lib/mockAreaDetails';
 
 Ion.defaultAccessToken = '';
 
@@ -73,12 +81,108 @@ function pointBudgetToCacheBytes(budget: number): number {
   return Math.round(minBytes + t * (maxBytes - minBytes));
 }
 
-function buildPointCloudStyle(opacity: number): Cesium3DTileStyle {
+function clampUnit(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function buildPointCloudStyle(opacity: number, pointSize: number): Cesium3DTileStyle {
   const a = Math.min(1, Math.max(0, opacity));
   return new Cesium3DTileStyle({
-    pointSize: 6,
+    pointSize,
     color: `color("white", ${a})`,
   });
+}
+
+function pickScenePosition(
+  viewer: import('cesium').Viewer,
+  windowPosition: Cartesian2
+): Cartesian3 | null {
+  const scene = viewer.scene;
+
+  if (scene.pickPositionSupported) {
+    const picked = scene.pickPosition(windowPosition);
+    if (defined(picked)) return picked;
+  }
+
+  const ray = viewer.camera.getPickRay(windowPosition);
+  if (!ray) return null;
+  const globePick = scene.globe.pick(ray, scene);
+  return defined(globePick) ? globePick : null;
+}
+
+function cartesianToMeasurementPoint(position: Cartesian3) {
+  const cartographic = Cartographic.fromCartesian(position);
+  return {
+    longitude: CesiumMath.toDegrees(cartographic.longitude),
+    latitude: CesiumMath.toDegrees(cartographic.latitude),
+    height: cartographic.height,
+  };
+}
+
+function computeDistanceMeters(points: Cartesian3[]): number {
+  if (points.length < 2) return 0;
+
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const start = Cartographic.fromCartesian(points[i - 1]);
+    const end = Cartographic.fromCartesian(points[i]);
+    const geodesic = new EllipsoidGeodesic(start, end);
+    const surfaceDistance = geodesic.surfaceDistance ?? 0;
+    const verticalDelta = (end.height ?? 0) - (start.height ?? 0);
+    total += Math.sqrt(surfaceDistance * surfaceDistance + verticalDelta * verticalDelta);
+  }
+
+  return total;
+}
+
+function computeAreaSquareMeters(points: Cartesian3[]): number {
+  if (points.length < 3) return 0;
+
+  const center = points.reduce(
+    (acc, point) => Cartesian3.add(acc, point, acc),
+    new Cartesian3(0, 0, 0)
+  );
+  const centroid = Cartesian3.multiplyByScalar(center, 1 / points.length, new Cartesian3());
+  const inverseTransform = Matrix4.inverseTransformation(
+    Transforms.eastNorthUpToFixedFrame(centroid),
+    new Matrix4()
+  );
+  const projected = points.map((point) =>
+    Matrix4.multiplyByPoint(inverseTransform, point, new Cartesian3())
+  );
+
+  let sum = 0;
+  for (let i = 0; i < projected.length; i++) {
+    const current = projected[i];
+    const next = projected[(i + 1) % projected.length];
+    sum += current.x * next.y - next.x * current.y;
+  }
+
+  return Math.abs(sum) * 0.5;
+}
+
+function formatDistance(distanceMeters: number): string {
+  return distanceMeters >= 1000
+    ? `${(distanceMeters / 1000).toFixed(2)} km`
+    : `${distanceMeters.toFixed(1)} m`;
+}
+
+function formatArea(areaSquareMeters: number): string {
+  return areaSquareMeters >= 10000
+    ? `${(areaSquareMeters / 10000).toFixed(2)} ha`
+    : `${areaSquareMeters.toFixed(0)} m\u00B2`;
+}
+
+function normalizeSelectedFeature(
+  props: Record<string, unknown>,
+  defaults: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    ...defaults,
+    ...props,
+    id: props.id ?? defaults.id ?? defaults._entityId ?? 'unknown',
+    name: props.name ?? defaults.name ?? 'Unnamed feature',
+  };
 }
 
 export default function Viewer() {
@@ -91,10 +195,16 @@ export default function Viewer() {
     terrainExaggeration,
     manifest,
     activeTool,
+    blendPreset,
+    selectedFeature,
     setSelectedFeature,
+    setSelectedAreaDetails,
+    setAreaDetailsLoading,
     pointBudget,
     setLayerError,
     setLayerLoading,
+    setMeasurement,
+    clearMeasurement,
   } = useViewerStore(
     useShallow((s) => ({
       layers: s.layers,
@@ -105,10 +215,16 @@ export default function Viewer() {
       terrainExaggeration: s.terrainExaggeration,
       manifest: s.manifest,
       activeTool: s.activeTool,
+      blendPreset: s.blendPreset,
+      selectedFeature: s.selectedFeature,
       setSelectedFeature: s.setSelectedFeature,
+      setSelectedAreaDetails: s.setSelectedAreaDetails,
+      setAreaDetailsLoading: s.setAreaDetailsLoading,
       pointBudget: s.pointBudget,
       setLayerError: s.setLayerError,
       setLayerLoading: s.setLayerLoading,
+      setMeasurement: s.setMeasurement,
+      clearMeasurement: s.clearMeasurement,
     }))
   );
 
@@ -116,6 +232,9 @@ export default function Viewer() {
   const [viewerMounted, setViewerMounted] = useState(false);
   const pointCloudZoomedRef = useRef<string | null>(null);
   const siteModelFramedKeyRef = useRef<string | null>(null);
+  const measurementPointsRef = useRef<Cartesian3[]>([]);
+  const measurementFloatingRef = useRef<Cartesian3 | null>(null);
+  const measurementCompleteRef = useRef(false);
   /** Ellipsoid height (m) at site centre — updated from terrain sampling */
   const [siteModelPosition, setSiteModelPosition] = useState(() =>
     Cartesian3.fromDegrees(SITE_CENTER_LNG, SITE_CENTER_LAT, 85)
@@ -186,6 +305,7 @@ export default function Viewer() {
     console.log(`${TAG} apply verticalExaggeration →`, terrainExaggeration);
     viewer.scene.verticalExaggeration = terrainExaggeration;
     viewer.scene.verticalExaggerationRelativeHeight = 0;
+    viewer.scene.globe.depthTestAgainstTerrain = true;
     viewer.scene.requestRender?.();
   }, [terrainExaggeration, viewerMounted]);
 
@@ -211,7 +331,7 @@ export default function Viewer() {
           const n = names[i];
           props[n] = picked.getProperty(n);
         }
-        setSelectedFeature(props);
+        setSelectedFeature(normalizeSelectedFeature(props, { name: '3D Tiles feature' }));
         return;
       }
 
@@ -222,6 +342,7 @@ export default function Viewer() {
       if (primitive instanceof CesiumModel) {
         setSelectedFeature({
           _source: 'site_model',
+          id: 'site_model',
           name: 'Site model (GLB)',
         });
         return;
@@ -238,16 +359,35 @@ export default function Viewer() {
 
         if (custom && typeof (custom as import('cesium').PropertyBag).getValue === 'function') {
           setSelectedFeature(
-            (custom as import('cesium').PropertyBag).getValue(now) as Record<string, unknown>
+            normalizeSelectedFeature(
+              (custom as import('cesium').PropertyBag).getValue(now) as Record<string, unknown>,
+              {
+                _source: 'geojson',
+                _entityId: entity.id,
+                name: entity.name ?? 'Region of interest',
+              }
+            )
           );
           return;
         }
         if (custom && typeof custom === 'object') {
-          setSelectedFeature(custom as Record<string, unknown>);
+          setSelectedFeature(
+            normalizeSelectedFeature(custom as Record<string, unknown>, {
+              _source: 'geojson',
+              _entityId: entity.id,
+              name: entity.name ?? 'Region of interest',
+            })
+          );
           return;
         }
         if (entity.properties) {
-          setSelectedFeature(entity.properties.getValue(now) as Record<string, unknown>);
+          setSelectedFeature(
+            normalizeSelectedFeature(entity.properties.getValue(now) as Record<string, unknown>, {
+              _source: 'geojson',
+              _entityId: entity.id,
+              name: entity.name ?? 'Region of interest',
+            })
+          );
           return;
         }
         setSelectedFeature({
@@ -265,6 +405,269 @@ export default function Viewer() {
       handler.destroy();
     };
   }, [activeTool, viewerMounted, setSelectedFeature]);
+
+  useEffect(() => {
+    if (!selectedFeature || selectedFeature._source !== 'geojson') {
+      setAreaDetailsLoading(false);
+      setSelectedAreaDetails(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAreaDetailsLoading(true);
+
+    fetchMockAreaDetails(selectedFeature)
+      .then((details) => {
+        if (!cancelled) setSelectedAreaDetails(details);
+      })
+      .catch((err) => {
+        console.error(`${TAG} mock area details failed`, err);
+        if (!cancelled) setSelectedAreaDetails(null);
+      })
+      .finally(() => {
+        if (!cancelled) setAreaDetailsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedFeature,
+    setAreaDetailsLoading,
+    setSelectedAreaDetails,
+  ]);
+
+  useEffect(() => {
+    const viewer = cesiumRef.current;
+    if (!viewer) return;
+
+    if (activeTool !== 'distance' && activeTool !== 'area') {
+      measurementPointsRef.current = [];
+      measurementFloatingRef.current = null;
+      measurementCompleteRef.current = false;
+      clearMeasurement();
+      viewer.scene.requestRender?.();
+      return;
+    }
+
+    const tool = activeTool;
+    measurementPointsRef.current = [];
+    measurementFloatingRef.current = null;
+    measurementCompleteRef.current = false;
+    setMeasurement({
+      tool,
+      status: 'idle',
+      points: [],
+    });
+
+    const syncMeasurement = (status: 'idle' | 'drawing' | 'complete') => {
+      const points = [...measurementPointsRef.current];
+      const measurement: {
+        tool: 'distance' | 'area';
+        status: 'idle' | 'drawing' | 'complete';
+        points: ReturnType<typeof cartesianToMeasurementPoint>[];
+        distanceMeters?: number;
+        areaSquareMeters?: number;
+      } = {
+        tool,
+        status,
+        points: points.map(cartesianToMeasurementPoint),
+      };
+
+      if (tool === 'distance') {
+        measurement.distanceMeters = computeDistanceMeters(points);
+      } else {
+        measurement.areaSquareMeters = computeAreaSquareMeters(points);
+      }
+
+      setMeasurement(measurement);
+      viewer.scene.requestRender?.();
+    };
+
+    const pointEntities: import('cesium').Entity[] = [];
+    const addPointMarker = (position: Cartesian3) => {
+      pointEntities.push(
+        viewer.entities.add({
+          position,
+          point: {
+            pixelSize: 10,
+            color: Color.WHITE,
+            outlineColor: Color.fromCssColorString('#1d4ed8'),
+            outlineWidth: 2,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        })
+      );
+    };
+
+    const polylineEntity = viewer.entities.add({
+      polyline: {
+        positions: new CallbackProperty(() => {
+          const positions = [...measurementPointsRef.current];
+          if (measurementFloatingRef.current) positions.push(measurementFloatingRef.current);
+          return positions.length >= 2 ? positions : [];
+        }, false),
+        width: 3,
+        clampToGround: true,
+        material: Color.fromCssColorString('#2563eb'),
+      },
+    });
+
+    const polygonEntity =
+      tool === 'area'
+        ? viewer.entities.add({
+            polygon: {
+              hierarchy: new CallbackProperty(() => {
+                const positions = [...measurementPointsRef.current];
+                if (measurementFloatingRef.current) positions.push(measurementFloatingRef.current);
+                return positions.length >= 3 ? new PolygonHierarchy(positions) : undefined;
+              }, false),
+              material: Color.fromCssColorString('#2563eb').withAlpha(0.18),
+              outline: true,
+              outlineColor: Color.fromCssColorString('#1d4ed8'),
+            },
+          })
+        : null;
+
+    const previewPointEntity = viewer.entities.add({
+      position: new CallbackPositionProperty(
+        () => measurementFloatingRef.current ?? undefined,
+        false
+      ),
+      point: {
+        pixelSize: 10,
+        color: Color.WHITE,
+        outlineColor: Color.fromCssColorString('#2563eb'),
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    previewPointEntity.show = false;
+
+    const labelEntity = viewer.entities.add({
+      position: new CallbackPositionProperty(() => {
+        return (
+          measurementFloatingRef.current ??
+          measurementPointsRef.current[measurementPointsRef.current.length - 1] ??
+          undefined
+        );
+      }, false),
+      label: {
+        text: new CallbackProperty(() => {
+          const committed = measurementPointsRef.current;
+          if (tool === 'distance') {
+            const positions = [...committed];
+            if (measurementFloatingRef.current) positions.push(measurementFloatingRef.current);
+            return committed.length === 0
+              ? 'Click to start distance'
+              : formatDistance(computeDistanceMeters(positions));
+          }
+
+          const positions = [...committed];
+          if (measurementFloatingRef.current) positions.push(measurementFloatingRef.current);
+          if (committed.length === 0) return 'Click to start area';
+          if (positions.length < 3) return `Vertices: ${positions.length}`;
+          return formatArea(computeAreaSquareMeters(positions));
+        }, false),
+        showBackground: true,
+        backgroundColor: Color.fromCssColorString('#0f172a').withAlpha(0.8),
+        fillColor: Color.WHITE,
+        style: LabelStyle.FILL,
+        font: '600 13px sans-serif',
+        pixelOffset: new Cartesian2(0, -28),
+        verticalOrigin: VerticalOrigin.BOTTOM,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    labelEntity.show = false;
+
+    const resetMeasurement = (position?: Cartesian3) => {
+      pointEntities.forEach((entity) => viewer.entities.remove(entity));
+      pointEntities.length = 0;
+      measurementPointsRef.current = [];
+      measurementFloatingRef.current = null;
+      measurementCompleteRef.current = false;
+      previewPointEntity.show = false;
+      labelEntity.show = false;
+
+      if (position) {
+        measurementPointsRef.current = [position];
+        addPointMarker(position);
+        labelEntity.show = true;
+        syncMeasurement('drawing');
+      } else {
+        syncMeasurement('idle');
+      }
+    };
+
+    const finalizeArea = () => {
+      if (measurementPointsRef.current.length < 3) return;
+      measurementFloatingRef.current = null;
+      measurementCompleteRef.current = true;
+      previewPointEntity.show = false;
+      syncMeasurement('complete');
+    };
+
+    const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction((click: { position: Cartesian2 }) => {
+      const position = pickScenePosition(viewer, click.position);
+      if (!position) return;
+
+      if (tool === 'distance') {
+        if (measurementCompleteRef.current || measurementPointsRef.current.length >= 2) {
+          resetMeasurement(position);
+          return;
+        }
+
+        measurementPointsRef.current = [...measurementPointsRef.current, position];
+        measurementFloatingRef.current = null;
+        addPointMarker(position);
+        if (measurementPointsRef.current.length >= 2) {
+          measurementCompleteRef.current = true;
+          previewPointEntity.show = false;
+        }
+        labelEntity.show = true;
+        syncMeasurement(measurementPointsRef.current.length >= 2 ? 'complete' : 'drawing');
+        return;
+      }
+
+      if (measurementCompleteRef.current) {
+        resetMeasurement(position);
+        return;
+      }
+
+      measurementPointsRef.current = [...measurementPointsRef.current, position];
+      addPointMarker(position);
+      labelEntity.show = true;
+      syncMeasurement('drawing');
+    }, ScreenSpaceEventType.LEFT_CLICK);
+
+    handler.setInputAction((movement: { endPosition: Cartesian2 }) => {
+      if (measurementPointsRef.current.length === 0 || measurementCompleteRef.current) return;
+      const position = pickScenePosition(viewer, movement.endPosition);
+      if (!position) return;
+      measurementFloatingRef.current = position;
+      previewPointEntity.show = true;
+      viewer.scene.requestRender?.();
+    }, ScreenSpaceEventType.MOUSE_MOVE);
+
+    handler.setInputAction(() => {
+      if (tool === 'area') finalizeArea();
+    }, ScreenSpaceEventType.RIGHT_CLICK);
+
+    return () => {
+      handler.destroy();
+      measurementPointsRef.current = [];
+      measurementFloatingRef.current = null;
+      measurementCompleteRef.current = false;
+      [...pointEntities, polylineEntity, previewPointEntity, labelEntity].forEach((entity) =>
+        viewer.entities.remove(entity)
+      );
+      if (polygonEntity) viewer.entities.remove(polygonEntity);
+      clearMeasurement();
+      viewer.scene.requestRender?.();
+    };
+  }, [activeTool, clearMeasurement, setMeasurement]);
 
   const orthoUrl = getAssetUrl('ortho');
   const terrainUrl = getAssetUrl(terrainMode === 'dtm' ? 'terrain_dtm' : 'terrain_dsm');
@@ -287,9 +690,41 @@ export default function Viewer() {
     layers.site_model.visible &&
     layers.site_model.opacity > 0.02;
 
+  const orthoAlpha = useMemo(() => {
+    const base = layers.ortho.opacity;
+    return clampUnit(blendPreset === 'embedded' ? base * 0.82 : base);
+  }, [blendPreset, layers.ortho.opacity]);
+
+  const pointCloudOpacity = useMemo(() => {
+    const base = layers.laz.opacity;
+    return clampUnit(blendPreset === 'embedded' ? base * 0.76 : base);
+  }, [blendPreset, layers.laz.opacity]);
+
+  const pointCloudPointSize = useMemo(
+    () => (blendPreset === 'embedded' ? 4.5 : 6),
+    [blendPreset]
+  );
+
+  const polygonFillAlpha = useMemo(() => {
+    const multiplier = blendPreset === 'embedded' ? 0.2 : 0.35;
+    return clampUnit(layers.polygons.opacity * multiplier);
+  }, [blendPreset, layers.polygons.opacity]);
+
+  const polygonStrokeAlpha = useMemo(() => {
+    const multiplier = blendPreset === 'embedded' ? 0.8 : 1;
+    return clampUnit(layers.polygons.opacity * multiplier);
+  }, [blendPreset, layers.polygons.opacity]);
+
   const siteModelColor = useMemo(
-    () => Color.WHITE.withAlpha(Math.min(1, Math.max(0, layers.site_model.opacity))),
-    [layers.site_model.opacity]
+    () =>
+      Color.WHITE.withAlpha(
+        clampUnit(
+          blendPreset === 'embedded'
+            ? layers.site_model.opacity * 0.82
+            : layers.site_model.opacity
+        )
+      ),
+    [blendPreset, layers.site_model.opacity]
   );
 
   const siteModelMatrix = useMemo(
@@ -440,8 +875,8 @@ export default function Viewer() {
     [pointBudget]
   );
   const pointCloudStyle = useMemo(
-    () => buildPointCloudStyle(layers.laz.opacity),
-    [layers.laz.opacity]
+    () => buildPointCloudStyle(pointCloudOpacity, pointCloudPointSize),
+    [pointCloudOpacity, pointCloudPointSize]
   );
 
   useEffect(() => {
@@ -482,9 +917,11 @@ export default function Viewer() {
       layers.site_model.visible && !!siteModelUrl
     );
     console.log('terrain   mode=%s  url=%s → render=%s', terrainMode, terrainUrl ?? '—', !!terrainUrl);
+    console.log('blend     preset=%s', blendPreset);
     console.log(`${TAG} point cloud SSE=${tilesetSse.toFixed(1)} cacheMB=${(tilesetCacheBytes / 1024 / 1024).toFixed(0)}`);
     console.groupEnd();
   }, [
+    blendPreset,
     layers,
     terrainMode,
     orthoUrl,
@@ -599,10 +1036,10 @@ export default function Viewer() {
   );
 
   return (
-    <div className="relative w-full h-screen overflow-hidden flex bg-gray-900">
+    <div className="relative w-full h-[100dvh] overflow-hidden flex bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <LayerPanel />
 
-      <div className="flex-1 relative h-full">
+      <div className="flex-1 relative h-full min-w-0">
         <Toolbar />
 
         <ResiumViewer
@@ -630,7 +1067,7 @@ export default function Viewer() {
           <ImageryLayer imageryProvider={basemapProvider} />
 
           {layers.ortho.visible && orthoProvider && (
-            <ImageryLayer imageryProvider={orthoProvider} alpha={layers.ortho.opacity} />
+            <ImageryLayer imageryProvider={orthoProvider} alpha={orthoAlpha} />
           )}
 
           {layers.laz.visible && pointCloudTilesetUrl && (
@@ -649,8 +1086,8 @@ export default function Viewer() {
           {layers.polygons.visible && vectorUrl && (
             <GeoJsonDataSource
               data={vectorUrl}
-              stroke={Color.fromCssColorString('#ef4444')}
-              fill={Color.fromCssColorString('#ef4444').withAlpha(layers.polygons.opacity * 0.35)}
+              stroke={Color.fromCssColorString('#ef4444').withAlpha(polygonStrokeAlpha)}
+              fill={Color.fromCssColorString('#ef4444').withAlpha(polygonFillAlpha)}
               strokeWidth={2}
               clampToGround
               onLoad={(ds) => {
