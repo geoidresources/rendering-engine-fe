@@ -12,6 +12,7 @@ import {
   UrlTemplateImageryProvider,
   CesiumTerrainProvider,
   Cartesian3,
+  Cartesian2,
   Math as CesiumMath,
   Color,
   Rectangle,
@@ -39,6 +40,7 @@ import { useViewerStore } from '../store/viewerStore';
 import { LayerPanel } from './LayerPanel';
 import { Toolbar } from './Toolbar';
 import { InspectorPanel } from './InspectorPanel';
+import { fetchMockAreaDetails } from '../lib/mockAreaDetails';
 
 Ion.defaultAccessToken = '';
 
@@ -71,6 +73,98 @@ function buildPointCloudStyle(opacity: number): Cesium3DTileStyle | undefined {
   });
 }
 
+function pickScenePosition(
+  viewer: import('cesium').Viewer,
+  windowPosition: Cartesian2
+): Cartesian3 | null {
+  const scene = viewer.scene;
+
+  if (scene.pickPositionSupported) {
+    const picked = scene.pickPosition(windowPosition);
+    if (defined(picked)) return picked;
+  }
+
+  const ray = viewer.camera.getPickRay(windowPosition);
+  if (!ray) return null;
+  const globePick = scene.globe.pick(ray, scene);
+  return defined(globePick) ? globePick : null;
+}
+
+function cartesianToMeasurementPoint(position: Cartesian3) {
+  const cartographic = Cartographic.fromCartesian(position);
+  return {
+    longitude: CesiumMath.toDegrees(cartographic.longitude),
+    latitude: CesiumMath.toDegrees(cartographic.latitude),
+    height: cartographic.height,
+  };
+}
+
+function computeDistanceMeters(points: Cartesian3[]): number {
+  if (points.length < 2) return 0;
+
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const start = Cartographic.fromCartesian(points[i - 1]);
+    const end = Cartographic.fromCartesian(points[i]);
+    const geodesic = new EllipsoidGeodesic(start, end);
+    const surfaceDistance = geodesic.surfaceDistance ?? 0;
+    const verticalDelta = (end.height ?? 0) - (start.height ?? 0);
+    total += Math.sqrt(surfaceDistance * surfaceDistance + verticalDelta * verticalDelta);
+  }
+
+  return total;
+}
+
+function computeAreaSquareMeters(points: Cartesian3[]): number {
+  if (points.length < 3) return 0;
+
+  const center = points.reduce(
+    (acc, point) => Cartesian3.add(acc, point, acc),
+    new Cartesian3(0, 0, 0)
+  );
+  const centroid = Cartesian3.multiplyByScalar(center, 1 / points.length, new Cartesian3());
+  const inverseTransform = Matrix4.inverseTransformation(
+    Transforms.eastNorthUpToFixedFrame(centroid),
+    new Matrix4()
+  );
+  const projected = points.map((point) =>
+    Matrix4.multiplyByPoint(inverseTransform, point, new Cartesian3())
+  );
+
+  let sum = 0;
+  for (let i = 0; i < projected.length; i++) {
+    const current = projected[i];
+    const next = projected[(i + 1) % projected.length];
+    sum += current.x * next.y - next.x * current.y;
+  }
+
+  return Math.abs(sum) * 0.5;
+}
+
+function formatDistance(distanceMeters: number): string {
+  return distanceMeters >= 1000
+    ? `${(distanceMeters / 1000).toFixed(2)} km`
+    : `${distanceMeters.toFixed(1)} m`;
+}
+
+function formatArea(areaSquareMeters: number): string {
+  return areaSquareMeters >= 10000
+    ? `${(areaSquareMeters / 10000).toFixed(2)} ha`
+    : `${areaSquareMeters.toFixed(0)} m\u00B2`;
+}
+
+function normalizeSelectedFeature(
+  props: Record<string, unknown>,
+  defaults: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return {
+    ...defaults,
+    ...props,
+    id: props.id ?? defaults.id ?? defaults._entityId ?? 'unknown',
+    name: props.name ?? defaults.name ?? 'Unnamed feature',
+  };
+}
+
 export default function Viewer() {
   const {
     layers,
@@ -81,10 +175,16 @@ export default function Viewer() {
     terrainExaggeration,
     manifest,
     activeTool,
+    blendPreset,
+    selectedFeature,
     setSelectedFeature,
+    setSelectedAreaDetails,
+    setAreaDetailsLoading,
     pointBudget,
     setLayerError,
     setLayerLoading,
+    setMeasurement,
+    clearMeasurement,
   } = useViewerStore(
     useShallow((s) => ({
       layers: s.layers,
@@ -95,10 +195,16 @@ export default function Viewer() {
       terrainExaggeration: s.terrainExaggeration,
       manifest: s.manifest,
       activeTool: s.activeTool,
+      blendPreset: s.blendPreset,
+      selectedFeature: s.selectedFeature,
       setSelectedFeature: s.setSelectedFeature,
+      setSelectedAreaDetails: s.setSelectedAreaDetails,
+      setAreaDetailsLoading: s.setAreaDetailsLoading,
       pointBudget: s.pointBudget,
       setLayerError: s.setLayerError,
       setLayerLoading: s.setLayerLoading,
+      setMeasurement: s.setMeasurement,
+      clearMeasurement: s.clearMeasurement,
     }))
   );
 
@@ -557,7 +663,7 @@ export default function Viewer() {
         for (let i = 0; i < names.length; i++) {
           props[names[i]] = picked.getProperty(names[i]);
         }
-        setSelectedFeature(props);
+        setSelectedFeature(normalizeSelectedFeature(props, { name: '3D Tiles feature' }));
         return;
       }
 
@@ -575,11 +681,23 @@ export default function Viewer() {
           return;
         }
         if (custom && typeof custom === 'object') {
-          setSelectedFeature(custom as Record<string, unknown>);
+          setSelectedFeature(
+            normalizeSelectedFeature(custom as Record<string, unknown>, {
+              _source: 'geojson',
+              _entityId: entity.id,
+              name: entity.name ?? 'Region of interest',
+            })
+          );
           return;
         }
         if (entity.properties) {
-          setSelectedFeature(entity.properties.getValue(now) as Record<string, unknown>);
+          setSelectedFeature(
+            normalizeSelectedFeature(entity.properties.getValue(now) as Record<string, unknown>, {
+              _source: 'geojson',
+              _entityId: entity.id,
+              name: entity.name ?? 'Region of interest',
+            })
+          );
           return;
         }
         setSelectedFeature({ _source: 'entity', id: entity.id, name: entity.name });
@@ -598,10 +716,10 @@ export default function Viewer() {
   }, [activeTool, setSelectedFeature]);
 
   return (
-    <div className="relative w-full h-screen overflow-hidden flex bg-gray-900">
+    <div className="relative w-full h-[100dvh] overflow-hidden flex bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       <LayerPanel />
 
-      <div className="flex-1 relative h-full">
+      <div className="flex-1 relative h-full min-w-0">
         <Toolbar />
         <div ref={containerRef} className="absolute inset-0 w-full h-full outline-none" tabIndex={0} />
         <InspectorPanel />

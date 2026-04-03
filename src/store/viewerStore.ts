@@ -4,6 +4,35 @@ import { Manifest } from '../types/manifest';
 export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons' | 'site_model';
 export type TerrainMode = 'dtm' | 'dsm';
 export type ToolMode = 'select' | 'distance' | 'area' | 'volume';
+export type BlendPreset = 'stacked' | 'embedded';
+
+export interface MeasurementPoint {
+  longitude: number;
+  latitude: number;
+  height: number;
+}
+
+export interface MeasurementState {
+  tool: 'distance' | 'area' | null;
+  status: 'idle' | 'drawing' | 'complete';
+  points: MeasurementPoint[];
+  distanceMeters?: number;
+  areaSquareMeters?: number;
+}
+
+export interface SelectedAreaDetails {
+  id: string;
+  name: string;
+  material: string;
+  status: string;
+  source: string;
+  areaSquareMeters: number;
+  perimeterMeters: number;
+  averageElevationMeters: number;
+  lastSurveyedAt: string;
+  owner: string;
+  notes: string;
+}
 
 export interface LayerState {
   id: LayerId;
@@ -51,10 +80,21 @@ export interface ViewerState {
   setPointBudget: (budget: number) => void;
   terrainExaggeration: number;
   setTerrainExaggeration: (exaggeration: number) => void;
+  blendPreset: BlendPreset;
+  setBlendPreset: (preset: BlendPreset) => void;
 
   // Selection
   selectedFeature: Record<string, unknown> | null;
   setSelectedFeature: (feature: Record<string, unknown> | null) => void;
+  selectedAreaDetails: SelectedAreaDetails | null;
+  setSelectedAreaDetails: (details: SelectedAreaDetails | null) => void;
+  areaDetailsLoading: boolean;
+  setAreaDetailsLoading: (loading: boolean) => void;
+
+  // Measurements
+  measurement: MeasurementState;
+  setMeasurement: (measurement: MeasurementState) => void;
+  clearMeasurement: () => void;
 
   // Camera state (Cesium coordinate system)
   cameraState: CesiumCameraState;
@@ -152,6 +192,9 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   terrainExaggeration: 1,
   setTerrainExaggeration: (exaggeration) => set({ terrainExaggeration: exaggeration }),
 
+  blendPreset: 'embedded',
+  setBlendPreset: (blendPreset) => set({ blendPreset }),
+
   setLayerVisibility: (id, visible) =>
     set((state) => ({ layers: { ...state.layers, [id]: { ...state.layers[id], visible } } })),
 
@@ -169,6 +212,14 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   selectedFeature: null,
   setSelectedFeature: (feature) => set({ selectedFeature: feature }),
+  selectedAreaDetails: null,
+  setSelectedAreaDetails: (selectedAreaDetails) => set({ selectedAreaDetails }),
+  areaDetailsLoading: false,
+  setAreaDetailsLoading: (areaDetailsLoading) => set({ areaDetailsLoading }),
+
+  measurement: initialMeasurement,
+  setMeasurement: (measurement) => set({ measurement }),
+  clearMeasurement: () => set({ measurement: initialMeasurement }),
 
   cameraState: initialCameraState,
   setCameraState: (cameraState) => set({ cameraState }),
