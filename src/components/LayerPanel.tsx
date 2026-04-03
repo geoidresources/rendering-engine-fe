@@ -7,6 +7,8 @@ export const LayerPanel: React.FC = () => {
     layers,
     setLayerVisibility,
     setLayerOpacity,
+    blendPreset,
+    setBlendPreset,
   } = useViewerStore();
 
   return (

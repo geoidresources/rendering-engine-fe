@@ -112,6 +112,12 @@ const initialLayers: Record<LayerId, LayerState> = {
 
 // Mine site centre: lon=152.414949, lat=-32.062341
 // height ~3000m puts the full site nicely in view on first load.
+const initialMeasurement: MeasurementState = {
+  tool: null,
+  status: 'idle',
+  points: [],
+};
+
 const initialCameraState: CesiumCameraState = {
   longitude: 152.414949,
   latitude: -32.062341,

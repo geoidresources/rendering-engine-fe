@@ -33,6 +33,7 @@ import {
   Cesium3DTileset,
   GeoJsonDataSource,
   Matrix4,
+  EllipsoidGeodesic,
 } from 'cesium';
 
 // We do not import resium anymore
