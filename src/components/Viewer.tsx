@@ -31,6 +31,7 @@ import {
   ImageryLayer,
   Cesium3DTileset,
   GeoJsonDataSource,
+  Matrix4,
 } from 'cesium';
 
 // We do not import resium anymore
@@ -66,7 +67,7 @@ function buildPointCloudStyle(opacity: number): Cesium3DTileStyle | undefined {
   if (a >= 0.99) return undefined;
   return new Cesium3DTileStyle({
     pointSize: 3,
-    color: `rgba(255, 255, 255, ${a})`,
+    color: `color() * vec4(1.0, 1.0, 1.0, ${a})`,
   });
 }
 
@@ -158,8 +159,7 @@ export default function Viewer() {
       selectionIndicator: false,
       infoBox: false,
       baseLayer: false as unknown as ImageryLayer,
-      requestRenderMode: true,
-      maximumRenderTimeChange: 0.0,
+      requestRenderMode: false,
       creditContainer,
     });
 
@@ -244,18 +244,29 @@ export default function Viewer() {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
-    
+
     if (!terrainUrl) {
       viewer.terrainProvider = new EllipsoidTerrainProvider();
+      viewer.scene.requestRender();
     } else {
       CesiumTerrainProvider.fromUrl(terrainUrl, { requestVertexNormals: true }).then((tp) => {
         if (!viewer.isDestroyed()) {
           viewer.terrainProvider = tp;
           viewer.scene.requestRender();
+          setLayerError('dsm', null);
         }
-      }).catch(e => console.error(`${TAG} terrain fail`, e));
+      }).catch(e => {
+        console.error(`${TAG} terrain fail`, e);
+        if (!viewer.isDestroyed()) {
+          viewer.terrainProvider = new EllipsoidTerrainProvider();
+          viewer.scene.requestRender();
+        }
+        if (terrainMode === 'dsm') {
+          setLayerError('dsm', 'DSM terrain data is not available. Falling back to flat terrain.');
+        }
+      });
     }
-  }, [terrainUrl]);
+  }, [terrainUrl, terrainMode, setLayerError]);
 
   // ---- Terrain Exaggeration ----
   useEffect(() => {
@@ -337,6 +348,29 @@ export default function Viewer() {
             }
         }).then(tileset => {
             if (!viewer.isDestroyed() && isSubscribed) {
+                // Detect geographic coords in root transform (PDAL cesium writer outputs lat/lon/height instead of ECEF)
+                const rootTransform = tileset.root.transform;
+                const translation = Matrix4.getTranslation(rootTransform, new Cartesian3());
+                const magnitude = Cartesian3.magnitude(translation);
+                if (magnitude > 0 && magnitude < 100000) {
+                    const lat = translation.x;
+                    const lon = translation.y;
+                    const height = translation.z;
+                    const ecefCenter = Cartesian3.fromDegrees(lon, lat, height);
+                    const enuToEcef = Transforms.eastNorthUpToFixedFrame(ecefCenter);
+                    const mPerDegLat = 111132.0;
+                    const mPerDegLon = 111132.0 * Math.cos(CesiumMath.toRadians(lat));
+                    // local x (lat offset) → North, local y (lon offset) → East, local z → Up
+                    const localToEnu = new Matrix4(
+                        0,          mPerDegLon, 0, 0,
+                        mPerDegLat, 0,          0, 0,
+                        0,          0,          1, 0,
+                        0,          0,          0, 1,
+                    );
+                    tileset.root.transform = Matrix4.IDENTITY;
+                    tileset.modelMatrix = Matrix4.multiply(enuToEcef, localToEnu, new Matrix4());
+                    console.info(`${TAG} Corrected geographic root transform → ECEF (lat=${lat.toFixed(4)}, lon=${lon.toFixed(4)})`);
+                }
                 viewer.scene.primitives.add(tileset);
                 tilesetRef.current = tileset;
                 tileset.show = layers.laz.visible;
@@ -398,32 +432,36 @@ export default function Viewer() {
 
     let isSubscribed = true;
     if (!vectorDataSourceRef.current) {
+        setLayerLoading('polygons', true);
         GeoJsonDataSource.load(vectorUrl, {
             stroke: Color.fromCssColorString('#ef4444'),
             fill: Color.fromCssColorString('#ef4444').withAlpha(layers.polygons.opacity * 0.35),
             strokeWidth: 2,
-            clampToGround: true, // Ground/Classification Primitives mapping handled internally by Cesium since 1.62
+            clampToGround: true,
         }).then(ds => {
             if (!viewer.isDestroyed() && isSubscribed) {
                 viewer.dataSources.add(ds);
                 vectorDataSourceRef.current = ds;
-                
-                // Polyfill properties for pick event
                 ds.entities.values.forEach((entity) => {
                   (entity as any)['_geoJsonProperties'] = entity.properties;
                 });
+                setLayerLoading('polygons', false);
                 viewer.scene.requestRender();
+            }
+        }).catch(e => {
+            console.error(`${TAG} Failed to load GeoJSON`, e);
+            if (isSubscribed) {
+                setLayerError('polygons', 'Failed to load vector data.');
+                setLayerLoading('polygons', false);
             }
         });
     } else {
         vectorDataSourceRef.current.show = true;
-        // Updating fill color of entities dynamically is slightly heavier over collections in vanilla Cesium, 
-        // so we re-load if necessary, or just rely on CSS injection (but for now simple .show=true covers visibility bounds).
         viewer.scene.requestRender();
     }
 
     return () => { isSubscribed = false; };
-  }, [vectorUrl, layers.polygons.visible, layers.polygons.opacity]);
+  }, [vectorUrl, layers.polygons.visible, layers.polygons.opacity, setLayerLoading, setLayerError]);
 
   // ---- GLB Site Model ---
   useEffect(() => {

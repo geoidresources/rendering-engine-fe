@@ -110,7 +110,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     try {
       const baseUrl = id.includes('?') ? id.split('?')[0] : id;
       const query = id.includes('?') ? '?' + id.split('?')[1] : '';
-      const response = await fetch(`http://localhost:8080/api/manifests/${baseUrl}${query}`);
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+      const response = await fetch(`${apiBase}/api/manifests/${baseUrl}${query}`);
       if (!response.ok) throw new Error('Failed to load manifest');
       const manifest = (await response.json()) as Manifest;
       const nextState: Partial<ViewerState> = { manifest };
