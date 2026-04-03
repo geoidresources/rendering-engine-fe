@@ -5,16 +5,8 @@ if (typeof window !== 'undefined') {
     typeof CESIUM_BASE_URL !== 'undefined' ? CESIUM_BASE_URL : '/cesiumStatic';
 }
 
-import React, { useEffect, useMemo, useCallback, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
-import {
-  Viewer as ResiumViewer,
-  ImageryLayer,
-  Cesium3DTileset,
-  GeoJsonDataSource,
-  Model,
-  CameraFlyTo,
-} from 'resium';
 import {
   Ion,
   UrlTemplateImageryProvider,
@@ -32,14 +24,17 @@ import {
   Cartographic,
   sampleTerrainMostDetailed,
   EllipsoidTerrainProvider,
-  HeadingPitchRange,
   ColorBlendMode,
   Transforms,
-  Matrix4,
-  BoundingSphere,
   Model as CesiumModel,
+  Viewer as CesiumViewer,
+  ImageryLayer,
+  Cesium3DTileset,
+  GeoJsonDataSource,
+  Matrix4,
 } from 'cesium';
 
+// We do not import resium anymore
 import { useViewerStore } from '../store/viewerStore';
 import { LayerPanel } from './LayerPanel';
 import { Toolbar } from './Toolbar';
@@ -47,37 +42,32 @@ import { InspectorPanel } from './InspectorPanel';
 
 Ion.defaultAccessToken = '';
 
-const TAG = '[CesiumViewer]';
-const SITE_CENTER_LNG = 152.414949;
-const SITE_CENTER_LAT = -32.062341;
-const POINT_BUDGET_MIN = 100_000;
-const POINT_BUDGET_MAX = 10_000_000;
+const TAG = '[Viewer]';
+const DEFAULT_SITE_CENTER_LNG = 152.414949;
+const DEFAULT_SITE_CENTER_LAT = -32.062341;
 
-/** Higher point budget → lower SSE (more detail on screen). */
 function pointBudgetToMaximumScreenSpaceError(budget: number): number {
-  const t = Math.min(
-    1,
-    Math.max(0, (budget - POINT_BUDGET_MIN) / (POINT_BUDGET_MAX - POINT_BUDGET_MIN))
-  );
-  return 40 - t * (40 - 2);
+  const POINT_BUDGET_MIN = 100_000;
+  const POINT_BUDGET_MAX = 10_000_000;
+  const t = Math.min(1, Math.max(0, (budget - POINT_BUDGET_MIN) / (POINT_BUDGET_MAX - POINT_BUDGET_MIN)));
+  return 32 - t * (32 - 2);
 }
 
-/** Higher point budget → larger GPU tile cache (bytes). */
 function pointBudgetToCacheBytes(budget: number): number {
-  const t = Math.min(
-    1,
-    Math.max(0, (budget - POINT_BUDGET_MIN) / (POINT_BUDGET_MAX - POINT_BUDGET_MIN))
-  );
-  const minBytes = 64 * 1024 * 1024;
+  const POINT_BUDGET_MIN = 100_000;
+  const POINT_BUDGET_MAX = 10_000_000;
+  const t = Math.min(1, Math.max(0, (budget - POINT_BUDGET_MIN) / (POINT_BUDGET_MAX - POINT_BUDGET_MIN)));
+  const minBytes = 128 * 1024 * 1024;
   const maxBytes = 512 * 1024 * 1024;
   return Math.round(minBytes + t * (maxBytes - minBytes));
 }
 
-function buildPointCloudStyle(opacity: number): Cesium3DTileStyle {
+function buildPointCloudStyle(opacity: number): Cesium3DTileStyle | undefined {
   const a = Math.min(1, Math.max(0, opacity));
+  if (a >= 0.99) return undefined;
   return new Cesium3DTileStyle({
-    pointSize: 6,
-    color: `color("white", ${a})`,
+    pointSize: 3,
+    color: `color() * vec4(1.0, 1.0, 1.0, ${a})`,
   });
 }
 
@@ -112,89 +102,446 @@ export default function Viewer() {
     }))
   );
 
-  const cesiumRef = useRef<import('cesium').Viewer | null>(null);
-  const [viewerMounted, setViewerMounted] = useState(false);
-  const pointCloudZoomedRef = useRef<string | null>(null);
-  const siteModelFramedKeyRef = useRef<string | null>(null);
-  /** Ellipsoid height (m) at site centre — updated from terrain sampling */
-  const [siteModelPosition, setSiteModelPosition] = useState(() =>
-    Cartesian3.fromDegrees(SITE_CENTER_LNG, SITE_CENTER_LAT, 85)
-  );
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<CesiumViewer | null>(null);
+  
+  // Layer Refs to manage primitives iteratively
+  const baseMapLayerRef = useRef<ImageryLayer | null>(null);
+  const orthoLayerRef = useRef<ImageryLayer | null>(null);
+  const tilesetRef = useRef<Cesium3DTileset | null>(null);
+  const vectorDataSourceRef = useRef<GeoJsonDataSource | null>(null);
+  const modelPrimitiveRef = useRef<CesiumModel | null>(null);
+  const pickHandlerRef = useRef<ScreenSpaceEventHandler | null>(null);
+  
+  const siteModelAnchor = useMemo(() => manifest?.anchors?.find((a) => a.name === 'site_model'), [manifest]);
+  const boundsCenterLng = manifest?.bounds ? (manifest.bounds.west + manifest.bounds.east) / 2 : undefined;
+  const boundsCenterLat = manifest?.bounds ? (manifest.bounds.south + manifest.bounds.north) / 2 : undefined;
+  const siteCenterLng = siteModelAnchor?.longitude ?? boundsCenterLng ?? DEFAULT_SITE_CENTER_LNG;
+  const siteCenterLat = siteModelAnchor?.latitude ?? boundsCenterLat ?? DEFAULT_SITE_CENTER_LAT;
+  const siteCenterHeight = siteModelAnchor?.height ?? 85;
 
-  const handleViewerRef = useCallback(
-    (r: { cesiumElement: import('cesium').Viewer } | null) => {
-      const v = r?.cesiumElement ?? null;
-      cesiumRef.current = v;
-      setViewerMounted(!!v);
-      if (v) {
-        const { width, height } = v.canvas;
-        console.log(`${TAG} ResiumViewer mounted — canvas: ${width}×${height}`);
-      }
-    },
-    []
-  );
+  const pointCloudTilesetUrl = useMemo(() => {
+    if (!manifest?.assets) return undefined;
+    for (const a of manifest.assets) {
+      if (a.assetType === 'point_cloud' && (a.format === '3dtiles' || /tileset\.json/.test(a.url))) return a.url;
+    }
+    return undefined;
+  }, [manifest]);
+  const orthoUrl = getAssetUrl('ortho');
+  const terrainUrl = getAssetUrl(terrainMode === 'dtm' ? 'terrain_dtm' : 'terrain_dsm');
+  const vectorUrl = getAssetUrl('vector');
+  const siteModelUrl = getAssetUrl('site_model', 'glb');
+  const orthoAsset = useMemo(() => manifest?.assets?.find((a) => a.assetType === 'ortho'), [manifest]);
 
+  // Load manifest on mount
   useEffect(() => {
-    const id = `rendering-assets-v2?t=${Date.now()}`;
-    console.log(`${TAG} loadManifest →`, id);
-    loadManifest(id).then(() => {
-      const m = useViewerStore.getState().manifest;
-      if (m) {
-        console.log(
-          `${TAG} manifest loaded — id: ${m.id}, assets:`,
-          m.assets.map((a) => `${a.id}(${a.assetType}/${a.format})`).join(', ')
-        );
-      } else {
-        console.warn(`${TAG} manifest returned but is still null`);
-      }
-    });
+    const manifestId = process.env.NEXT_PUBLIC_MANIFEST_ID || 'rendering-assets-v2';
+    loadManifest(`${manifestId}?t=${Date.now()}`);
   }, [loadManifest]);
 
+  // ---- Initialize the Pure Cesium Viewer ----
   useEffect(() => {
-    const viewer = cesiumRef.current;
+    if (!containerRef.current || viewerRef.current) return;
+    
+    // Hide standard credit display elements to clean up DOM 
+    const creditContainer = document.createElement('div');
+    creditContainer.style.display = 'none';
+
+    const viewer = new CesiumViewer(containerRef.current, {
+      geocoder: false,
+      homeButton: false,
+      sceneModePicker: false,
+      baseLayerPicker: false,
+      navigationHelpButton: false,
+      animation: false,
+      timeline: false,
+      fullscreenButton: false,
+      selectionIndicator: false,
+      infoBox: false,
+      baseLayer: false as unknown as ImageryLayer,
+      requestRenderMode: false,
+      creditContainer,
+    });
+
+    // Production optimizations
+    viewer.scene.globe.depthTestAgainstTerrain = true;
+    viewer.scene.logarithmicDepthBuffer = true;
+    viewer.scene.fog.enabled = false;
+    if (viewer.scene.skyAtmosphere) {
+        viewer.scene.skyAtmosphere.show = true;
+        viewer.scene.skyAtmosphere.brightnessShift = -0.1;
+    }
+    viewer.scene.globe.enableLighting = false;
+    viewer.scene.globe.showGroundAtmosphere = false;
+    viewer.scene.globe.baseColor = Color.fromCssColorString('#1a1a2e');
+
+    // Add base map
+    const provider = new UrlTemplateImageryProvider({
+      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      subdomains: 'abcd',
+      minimumLevel: 0,
+      maximumLevel: 19,
+    });
+    baseMapLayerRef.current = viewer.scene.imageryLayers.addImageryProvider(provider);
+
+    viewerRef.current = viewer;
+
+    // Track Context Loss
+    const canvas = viewer.canvas;
+    const ctxLossHandler = (e: Event) => {
+        e.preventDefault();
+        console.error(`${TAG} WebGL Context Lost! You may need to refresh or reduce point budget.`);
+    };
+    canvas.addEventListener('webglcontextlost', ctxLossHandler);
+
+    return () => {
+      canvas.removeEventListener('webglcontextlost', ctxLossHandler);
+      viewer.destroy();
+      viewerRef.current = null;
+    };
+  }, []);
+
+  // ---- Initial FlyTo based on Manifest ----
+  const initialFrameDone = useRef(false);
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || !manifest || initialFrameDone.current) return;
+    
+    initialFrameDone.current = true;
+    const centerLon = boundsCenterLng ?? DEFAULT_SITE_CENTER_LNG;
+    const centerLat = boundsCenterLat ?? DEFAULT_SITE_CENTER_LAT;
+    const spanDeg = manifest.bounds ? Math.max(Math.abs(manifest.bounds.east - manifest.bounds.west), Math.abs(manifest.bounds.north - manifest.bounds.south), 0.002) : 0.02;
+    const baseHeight = Math.max(1200, spanDeg * 160000);
+    const scale = manifest.rendering?.suggestedViewHeightScale ?? 1;
+    
+    viewer.camera.flyTo({
+      destination: Cartesian3.fromDegrees(centerLon, centerLat, baseHeight * scale),
+      orientation: { heading: 0, pitch: CesiumMath.toRadians(-30), roll: 0 },
+      duration: 1.5,
+    });
+  }, [manifest, boundsCenterLng, boundsCenterLat]);
+
+  // ---- Camera Tracking ----
+  useEffect(() => {
+    const viewer = viewerRef.current;
     if (!viewer) return;
-    console.log(`${TAG} attaching camera moveEnd listener`);
     const handler = () => {
-      const cam = viewer.camera;
-      const pos = cam.positionCartographic;
-      const next = {
+      const pos = viewer.camera.positionCartographic;
+      setCameraState({
         longitude: CesiumMath.toDegrees(pos.longitude),
         latitude: CesiumMath.toDegrees(pos.latitude),
         height: pos.height,
-        heading: cam.heading,
-        pitch: cam.pitch,
-        roll: cam.roll,
-      };
-      console.log(
-        `${TAG} camera moveEnd — lng=${next.longitude.toFixed(5)}`,
-        `lat=${next.latitude.toFixed(5)}`,
-        `h=${Math.round(next.height)}m`,
-        `hdg=${(next.heading * 180 / Math.PI).toFixed(1)}°`,
-        `pitch=${(next.pitch * 180 / Math.PI).toFixed(1)}°`
-      );
-      setCameraState(next);
+        heading: viewer.camera.heading,
+        pitch: viewer.camera.pitch,
+        roll: viewer.camera.roll,
+      });
     };
     viewer.camera.moveEnd.addEventListener(handler);
-    return () => {
-      viewer.camera.moveEnd.removeEventListener(handler);
-    };
-  }, [setCameraState, viewerMounted]);
+    return () => { viewer.camera.moveEnd.removeEventListener(handler); };
+  }, [setCameraState]);
 
+  // ---- Terrain Provider ----
   useEffect(() => {
-    const viewer = cesiumRef.current;
+    const viewer = viewerRef.current;
     if (!viewer) return;
-    console.log(`${TAG} apply verticalExaggeration →`, terrainExaggeration);
+
+    if (!terrainUrl) {
+      viewer.terrainProvider = new EllipsoidTerrainProvider();
+      viewer.scene.requestRender();
+    } else {
+      CesiumTerrainProvider.fromUrl(terrainUrl, { requestVertexNormals: true }).then((tp) => {
+        if (!viewer.isDestroyed()) {
+          viewer.terrainProvider = tp;
+          viewer.scene.requestRender();
+          setLayerError('dsm', null);
+        }
+      }).catch(e => {
+        console.error(`${TAG} terrain fail`, e);
+        if (!viewer.isDestroyed()) {
+          viewer.terrainProvider = new EllipsoidTerrainProvider();
+          viewer.scene.requestRender();
+        }
+        if (terrainMode === 'dsm') {
+          setLayerError('dsm', 'DSM terrain data is not available. Falling back to flat terrain.');
+        }
+      });
+    }
+  }, [terrainUrl, terrainMode, setLayerError]);
+
+  // ---- Terrain Exaggeration ----
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
     viewer.scene.verticalExaggeration = terrainExaggeration;
     viewer.scene.verticalExaggerationRelativeHeight = 0;
-    viewer.scene.requestRender?.();
-  }, [terrainExaggeration, viewerMounted]);
+    viewer.scene.requestRender();
+  }, [terrainExaggeration]);
 
-  // Inspector: pick GeoJSON entities, 3D Tiles features, or generic entities
+  // ---- Orthomosaic Layer ----
   useEffect(() => {
-    const viewer = cesiumRef.current;
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    
+    if (!orthoUrl || !layers.ortho.visible) {
+      if (orthoLayerRef.current) {
+        orthoLayerRef.current.show = false;
+        viewer.scene.requestRender();
+      }
+      return;
+    }
+
+    if (!orthoLayerRef.current) {
+        const provider = new UrlTemplateImageryProvider({
+          url: orthoUrl,
+          minimumLevel: orthoAsset?.minZoom ?? 14,
+          maximumLevel: orthoAsset?.maxZoom ?? 22,
+          rectangle: manifest?.bounds
+            ? Rectangle.fromDegrees(manifest.bounds.west, manifest.bounds.south, manifest.bounds.east, manifest.bounds.north)
+            : Rectangle.fromDegrees(152.4, -32.08, 152.43, -32.04),
+        });
+        const clayer = viewer.scene.imageryLayers.addImageryProvider(provider);
+        orthoLayerRef.current = clayer;
+    }
+    
+    orthoLayerRef.current.show = true;
+    orthoLayerRef.current.alpha = layers.ortho.opacity;
+    viewer.scene.requestRender();
+  }, [orthoUrl, layers.ortho.visible, layers.ortho.opacity, orthoAsset, manifest]);
+
+  // ---- Point Cloud 3D Tileset (with dynamic EDL) ----
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    if (!pointCloudTilesetUrl || !layers.laz.visible) {
+      if (tilesetRef.current) {
+        tilesetRef.current.show = false;
+        viewer.scene.requestRender();
+      }
+      // Report issues if invisible due to missing url
+      if (layers.laz.visible && !pointCloudTilesetUrl) {
+          setLayerError('laz', 'No 3D Tiles URL found in manifest.');
+      }
+      return;
+    } else {
+        setLayerError('laz', null);
+    }
+
+    let isSubscribed = true;
+
+    if (!tilesetRef.current || (tilesetRef.current as any)._url !== pointCloudTilesetUrl) {
+        if (tilesetRef.current) {
+           viewer.scene.primitives.remove(tilesetRef.current);
+           tilesetRef.current = null;
+        }
+        setLayerLoading('laz', true);
+
+        Cesium3DTileset.fromUrl(pointCloudTilesetUrl, {
+            maximumScreenSpaceError: pointBudgetToMaximumScreenSpaceError(pointBudget),
+            cacheBytes: pointBudgetToCacheBytes(pointBudget),
+            pointCloudShading: {
+                attenuation: true,
+                eyeDomeLighting: true,
+                eyeDomeLightingStrength: 1.0,
+                maximumAttenuation: 4,
+                geometricErrorScale: 1.0,
+            }
+        }).then(tileset => {
+            if (!viewer.isDestroyed() && isSubscribed) {
+                // Detect geographic coords in root transform (PDAL cesium writer outputs lat/lon/height instead of ECEF)
+                const rootTransform = tileset.root.transform;
+                const translation = Matrix4.getTranslation(rootTransform, new Cartesian3());
+                const magnitude = Cartesian3.magnitude(translation);
+                if (magnitude > 0 && magnitude < 100000) {
+                    const lat = translation.x;
+                    const lon = translation.y;
+                    const height = translation.z;
+                    const ecefCenter = Cartesian3.fromDegrees(lon, lat, height);
+                    const enuToEcef = Transforms.eastNorthUpToFixedFrame(ecefCenter);
+                    const mPerDegLat = 111132.0;
+                    const mPerDegLon = 111132.0 * Math.cos(CesiumMath.toRadians(lat));
+                    // local x (lat offset) → North, local y (lon offset) → East, local z → Up
+                    const localToEnu = new Matrix4(
+                        0,          mPerDegLon, 0, 0,
+                        mPerDegLat, 0,          0, 0,
+                        0,          0,          1, 0,
+                        0,          0,          0, 1,
+                    );
+                    tileset.root.transform = Matrix4.IDENTITY;
+                    tileset.modelMatrix = Matrix4.multiply(enuToEcef, localToEnu, new Matrix4());
+                    console.info(`${TAG} Corrected geographic root transform → ECEF (lat=${lat.toFixed(4)}, lon=${lon.toFixed(4)})`);
+                }
+                viewer.scene.primitives.add(tileset);
+                tilesetRef.current = tileset;
+                tileset.show = layers.laz.visible;
+                tileset.style = buildPointCloudStyle(layers.laz.opacity) as any;
+                setLayerLoading('laz', false);
+                viewer.scene.requestRender();
+            }
+        }).catch(e => {
+            console.error(`${TAG} Failed to load point cloud`, e);
+            if (isSubscribed) {
+                setLayerError('laz', 'Failed to load point cloud. Check network tab.');
+                setLayerLoading('laz', false);
+            }
+        });
+    } else {
+        tilesetRef.current.show = true;
+        tilesetRef.current.style = buildPointCloudStyle(layers.laz.opacity) as any;
+        tilesetRef.current.maximumScreenSpaceError = pointBudgetToMaximumScreenSpaceError(pointBudget);
+        viewer.scene.requestRender();
+    }
+
+    return () => { isSubscribed = false; };
+  }, [pointCloudTilesetUrl, layers.laz.visible, layers.laz.opacity, pointBudget, setLayerError, setLayerLoading]);
+
+  // Add Dynamic EDL updates based on camera
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const updateEDL = () => {
+        const ts = tilesetRef.current;
+        if (!ts || !ts.show) return;
+        const camDist = viewer.camera.positionCartographic.height;
+        // As you get closer, strengthen the EDL outlines
+        if (ts.pointCloudShading) {
+            let strength = 0.5;
+            let radius = 1.0;
+            if (camDist < 500) { strength = 1.5; radius = 2.0; } 
+            else if (camDist < 2000) { strength = 1.0; radius = 1.5; }
+            ts.pointCloudShading.eyeDomeLightingStrength = strength;
+            ts.pointCloudShading.eyeDomeLightingRadius = radius;
+        }
+    };
+    viewer.scene.preRender.addEventListener(updateEDL);
+    return () => { viewer.scene.preRender.removeEventListener(updateEDL); };
+  }, []);
+
+  // ---- Vector (GeoJSON) Layer ---
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    if (!vectorUrl || !layers.polygons.visible) {
+      if (vectorDataSourceRef.current) {
+        vectorDataSourceRef.current.show = false;
+        viewer.scene.requestRender();
+      }
+      return;
+    }
+
+    let isSubscribed = true;
+    if (!vectorDataSourceRef.current) {
+        setLayerLoading('polygons', true);
+        GeoJsonDataSource.load(vectorUrl, {
+            stroke: Color.fromCssColorString('#ef4444'),
+            fill: Color.fromCssColorString('#ef4444').withAlpha(layers.polygons.opacity * 0.35),
+            strokeWidth: 2,
+            clampToGround: true,
+        }).then(ds => {
+            if (!viewer.isDestroyed() && isSubscribed) {
+                viewer.dataSources.add(ds);
+                vectorDataSourceRef.current = ds;
+                ds.entities.values.forEach((entity) => {
+                  (entity as any)['_geoJsonProperties'] = entity.properties;
+                });
+                setLayerLoading('polygons', false);
+                viewer.scene.requestRender();
+            }
+        }).catch(e => {
+            console.error(`${TAG} Failed to load GeoJSON`, e);
+            if (isSubscribed) {
+                setLayerError('polygons', 'Failed to load vector data.');
+                setLayerLoading('polygons', false);
+            }
+        });
+    } else {
+        vectorDataSourceRef.current.show = true;
+        viewer.scene.requestRender();
+    }
+
+    return () => { isSubscribed = false; };
+  }, [vectorUrl, layers.polygons.visible, layers.polygons.opacity, setLayerLoading, setLayerError]);
+
+  // ---- GLB Site Model ---
+  useEffect(() => {
+      const viewer = viewerRef.current;
+      if (!viewer) return;
+
+      const visible = !!siteModelUrl && layers.site_model.visible && layers.site_model.opacity > 0.02;
+      
+      if (!visible || !siteModelUrl) {
+          if (modelPrimitiveRef.current) {
+              modelPrimitiveRef.current.show = false;
+              viewer.scene.requestRender();
+          }
+          return;
+      }
+
+      setLayerLoading('site_model', true);
+
+      const sampleAndPlace = async () => {
+          let h = siteCenterHeight;
+          const tp = viewer.terrainProvider;
+          if (tp && !(tp instanceof EllipsoidTerrainProvider)) {
+              try {
+                  const updated = await sampleTerrainMostDetailed(tp, [Cartographic.fromDegrees(siteCenterLng, siteCenterLat)]);
+                  if (updated?.[0]?.height !== undefined) {
+                      h = updated[0].height + 12; // slight offset
+                  }
+              } catch (e) {
+                  // Fallback to default
+              }
+          }
+          
+          if (viewer.isDestroyed()) return;
+
+          const modelMatrix = Transforms.eastNorthUpToFixedFrame(Cartesian3.fromDegrees(siteCenterLng, siteCenterLat, h));
+          const color = Color.WHITE.withAlpha(Math.max(0, Math.min(1, layers.site_model.opacity)));
+
+          if (!modelPrimitiveRef.current) {
+               CesiumModel.fromGltfAsync({
+                   url: siteModelUrl,
+                   modelMatrix: modelMatrix,
+                   color: color,
+                   colorBlendMode: ColorBlendMode.MIX,
+                   colorBlendAmount: 1,
+               }).then(model => {
+                   if (viewer.isDestroyed()) return;
+                   viewer.scene.primitives.add(model);
+                   modelPrimitiveRef.current = model;
+                   model.show = layers.site_model.visible;
+                   setLayerLoading('site_model', false);
+                   viewer.scene.requestRender();
+               }).catch(e => {
+                   console.error("Failed to load model", e);
+                   setLayerError('site_model', 'Failed to load model');
+                   setLayerLoading('site_model', false);
+               });
+          } else {
+               modelPrimitiveRef.current.show = true;
+               modelPrimitiveRef.current.modelMatrix = modelMatrix;
+               modelPrimitiveRef.current.color = color;
+               setLayerLoading('site_model', false);
+               viewer.scene.requestRender();
+          }
+      };
+
+      sampleAndPlace();
+  }, [siteModelUrl, layers.site_model.visible, layers.site_model.opacity, terrainMode, terrainUrl, siteCenterLng, siteCenterLat, siteCenterHeight, setLayerLoading, setLayerError]);
+
+  // ---- Interaction Picker ----
+  useEffect(() => {
+    const viewer = viewerRef.current;
     if (!viewer || activeTool !== 'select') return;
 
+    if (pickHandlerRef.current) {
+        pickHandlerRef.current.destroy();
+    }
+    
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+    pickHandlerRef.current = handler;
+
     handler.setInputAction((click: { position: import('cesium').Cartesian2 }) => {
       const picked = viewer.scene.pick(click.position);
       const now = JulianDate.now();
@@ -208,38 +555,23 @@ export default function Viewer() {
         const names = picked.getPropertyIds();
         const props: Record<string, unknown> = { _source: '3dTiles' };
         for (let i = 0; i < names.length; i++) {
-          const n = names[i];
-          props[n] = picked.getProperty(n);
+          props[names[i]] = picked.getProperty(names[i]);
         }
         setSelectedFeature(props);
         return;
       }
 
-      const primitive =
-        picked && typeof picked === 'object' && 'primitive' in picked
-          ? (picked as { primitive: unknown }).primitive
-          : undefined;
+      const primitive = picked && typeof picked === 'object' && 'primitive' in picked ? (picked as any).primitive : undefined;
       if (primitive instanceof CesiumModel) {
-        setSelectedFeature({
-          _source: 'site_model',
-          name: 'Site model (GLB)',
-        });
+        setSelectedFeature({ _source: 'site_model', name: 'Site model (GLB)' });
         return;
       }
 
       if (picked.id && typeof picked.id === 'object') {
-        const entity = picked.id as import('cesium').Entity & {
-          properties?: import('cesium').PropertyBag;
-        };
-        const custom = (entity as unknown as Record<string, unknown>)._geoJsonProperties as
-          | import('cesium').PropertyBag
-          | Record<string, unknown>
-          | undefined;
-
-        if (custom && typeof (custom as import('cesium').PropertyBag).getValue === 'function') {
-          setSelectedFeature(
-            (custom as import('cesium').PropertyBag).getValue(now) as Record<string, unknown>
-          );
+        const entity = picked.id as import('cesium').Entity & { properties?: import('cesium').PropertyBag };
+        const custom = (entity as any)._geoJsonProperties;
+        if (custom && typeof custom.getValue === 'function') {
+          setSelectedFeature(custom.getValue(now) as Record<string, unknown>);
           return;
         }
         if (custom && typeof custom === 'object') {
@@ -250,11 +582,7 @@ export default function Viewer() {
           setSelectedFeature(entity.properties.getValue(now) as Record<string, unknown>);
           return;
         }
-        setSelectedFeature({
-          _source: 'entity',
-          id: entity.id,
-          name: entity.name,
-        });
+        setSelectedFeature({ _source: 'entity', id: entity.id, name: entity.name });
         return;
       }
 
@@ -262,341 +590,12 @@ export default function Viewer() {
     }, ScreenSpaceEventType.LEFT_CLICK);
 
     return () => {
-      handler.destroy();
+       if (pickHandlerRef.current) {
+           pickHandlerRef.current.destroy();
+           pickHandlerRef.current = null;
+       }
     };
-  }, [activeTool, viewerMounted, setSelectedFeature]);
-
-  const orthoUrl = getAssetUrl('ortho');
-  const terrainUrl = getAssetUrl(terrainMode === 'dtm' ? 'terrain_dtm' : 'terrain_dsm');
-  /** Cesium only streams 3D Tiles in-browser; LAZ in the manifest must be converted to tileset.json. */
-  const pointCloudTilesetUrl = useMemo(() => {
-    if (!manifest?.assets) return undefined;
-    for (const a of manifest.assets) {
-      if (a.assetType !== 'point_cloud') continue;
-      if (a.format === '3dtiles') return a.url;
-      if (/tileset\.json(\?|#|$)/i.test(a.url)) return a.url;
-    }
-    return undefined;
-  }, [manifest]);
-
-  const vectorUrl = getAssetUrl('vector');
-  const siteModelUrl = getAssetUrl('site_model', 'glb');
-
-  const siteModelVisible =
-    !!siteModelUrl &&
-    layers.site_model.visible &&
-    layers.site_model.opacity > 0.02;
-
-  const siteModelColor = useMemo(
-    () => Color.WHITE.withAlpha(Math.min(1, Math.max(0, layers.site_model.opacity))),
-    [layers.site_model.opacity]
-  );
-
-  const siteModelMatrix = useMemo(
-    () => Transforms.eastNorthUpToFixedFrame(siteModelPosition),
-    [siteModelPosition]
-  );
-
-  // Explain why Point Cloud layer cannot render when manifest only has LAZ
-  useEffect(() => {
-    if (!layers.laz.visible) {
-      setLayerError('laz', null);
-      return;
-    }
-    if (!manifest?.assets) return;
-
-    const pc = manifest.assets.filter((a) => a.assetType === 'point_cloud');
-    if (pc.length === 0) {
-      setLayerError('laz', null);
-      return;
-    }
-    if (!pointCloudTilesetUrl) {
-      const formats = [...new Set(pc.map((a) => a.format))].join(', ');
-      setLayerError(
-        'laz',
-        `No 3D Tiles URL (found format: ${formats}). LAZ cannot be streamed in Cesium — add a tileset.json asset or convert the point cloud to 3D Tiles.`
-      );
-    } else {
-      setLayerError('laz', null);
-    }
-  }, [layers.laz.visible, manifest, pointCloudTilesetUrl, setLayerError]);
-
-  useEffect(() => {
-    if (!layers.site_model.visible) siteModelFramedKeyRef.current = null;
-  }, [layers.site_model.visible]);
-
-  // Mark loading when the layer should show a model; cleared in Model onReady / onError
-  useEffect(() => {
-    if (!siteModelVisible || !siteModelUrl) {
-      setLayerLoading('site_model', false);
-      return;
-    }
-    setLayerLoading('site_model', true);
-    setLayerError('site_model', null);
-  }, [siteModelVisible, siteModelUrl, setLayerLoading, setLayerError]);
-
-  const handleSiteModelReady = useCallback(
-    (model: CesiumModel) => {
-      setLayerLoading('site_model', false);
-      setLayerError('site_model', null);
-
-      const frameKey = siteModelUrl ?? '';
-      if (siteModelFramedKeyRef.current === frameKey) return;
-
-      const viewer = cesiumRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-
-      let sphere = model.boundingSphere;
-      if (!defined(sphere)) {
-        const c = Matrix4.getTranslation(model.modelMatrix, new Cartesian3());
-        sphere = new BoundingSphere(c, 80);
-      }
-      const range = Math.max(sphere.radius * 2.8, 120);
-      const done = () => {
-        siteModelFramedKeyRef.current = frameKey;
-        console.log(`${TAG} camera framed site model (bounding sphere)`);
-      };
-      void Promise.resolve(
-        viewer.camera.flyToBoundingSphere(sphere, {
-          duration: 1.35,
-          offset: new HeadingPitchRange(0, CesiumMath.toRadians(-38), range),
-        }) as Promise<void> | void
-      )
-        .then(() => {
-          done();
-        })
-        .catch((err: unknown) => {
-          console.error(`${TAG} flyToBoundingSphere site model`, err);
-          setLayerError(
-            'site_model',
-            'Could not frame model — try zooming manually; check console for errors'
-          );
-        });
-    },
-    [siteModelUrl, setLayerError, setLayerLoading]
-  );
-
-  const handleSiteModelError = useCallback(
-    (err: unknown) => {
-      console.error(`${TAG} site model GLB load failed`, err);
-      setLayerLoading('site_model', false);
-      const msg = err instanceof Error ? err.message : String(err);
-      setLayerError(
-        'site_model',
-        `GLB failed to load: ${msg}. Check Network (404/CORS) and that CESIUM_BASE_URL includes Workers (Draco).`
-      );
-    },
-    [setLayerError, setLayerLoading]
-  );
-
-  // Place GLB on sampled terrain height; re-sample when terrain provider becomes available
-  useEffect(() => {
-    if (!siteModelVisible || !siteModelUrl) return;
-    const viewer = cesiumRef.current;
-    if (!viewer || viewer.isDestroyed?.()) return;
-
-    const fallback = () => {
-      setSiteModelPosition(Cartesian3.fromDegrees(SITE_CENTER_LNG, SITE_CENTER_LAT, 85));
-    };
-
-    const sample = () => {
-      const tp = viewer.terrainProvider;
-      if (!tp || tp instanceof EllipsoidTerrainProvider) {
-        fallback();
-        return;
-      }
-      const cartos = [Cartographic.fromDegrees(SITE_CENTER_LNG, SITE_CENTER_LAT)];
-      sampleTerrainMostDetailed(tp, cartos)
-        .then((updated) => {
-          if (!viewer.isDestroyed?.() && updated?.[0]) {
-            const c = updated[0];
-            const h = c.height ?? 0;
-            setSiteModelPosition(Cartesian3.fromRadians(c.longitude, c.latitude, h + 12));
-          } else {
-            fallback();
-          }
-        })
-        .catch((err) => {
-          console.warn(`${TAG} sampleTerrain for site model`, err);
-          fallback();
-        });
-    };
-
-    sample();
-    const globe = viewer.scene?.globe;
-    if (!globe?.terrainProviderChanged) return;
-    const removeListener = globe.terrainProviderChanged.addEventListener(sample);
-    return () => {
-      removeListener();
-    };
-  }, [siteModelVisible, siteModelUrl, viewerMounted, terrainUrl, terrainMode]);
-
-  const tilesetSse = useMemo(
-    () => pointBudgetToMaximumScreenSpaceError(pointBudget),
-    [pointBudget]
-  );
-  const tilesetCacheBytes = useMemo(
-    () => pointBudgetToCacheBytes(pointBudget),
-    [pointBudget]
-  );
-  const pointCloudStyle = useMemo(
-    () => buildPointCloudStyle(layers.laz.opacity),
-    [layers.laz.opacity]
-  );
-
-  useEffect(() => {
-    if (!manifest) return;
-    console.group(`${TAG} asset URLs (terrainMode=${terrainMode})`);
-    console.log('ortho      :', orthoUrl ?? '— not found');
-    console.log('terrain    :', terrainUrl ?? '— not found');
-    console.log('point cloud (3D Tiles):', pointCloudTilesetUrl ?? '— not found');
-    console.log('vector     :', vectorUrl ?? '— not found');
-    console.log('site model :', siteModelUrl ?? '— not found');
-    console.groupEnd();
-  }, [manifest, terrainMode, orthoUrl, terrainUrl, pointCloudTilesetUrl, vectorUrl, siteModelUrl]);
-
-  useEffect(() => {
-    console.group(`${TAG} layer render state`);
-    console.log(
-      'ortho     visible=%s url=%s → render=%s',
-      layers.ortho.visible,
-      orthoUrl ?? '—',
-      layers.ortho.visible && !!orthoUrl
-    );
-    console.log(
-      'laz       visible=%s url=%s → render=%s',
-      layers.laz.visible,
-      pointCloudTilesetUrl ?? '—',
-      layers.laz.visible && !!pointCloudTilesetUrl
-    );
-    console.log(
-      'polygons  visible=%s url=%s → render=%s',
-      layers.polygons.visible,
-      vectorUrl ?? '—',
-      layers.polygons.visible && !!vectorUrl
-    );
-    console.log(
-      'siteModel visible=%s url=%s → render=%s',
-      layers.site_model.visible,
-      siteModelUrl ?? '—',
-      layers.site_model.visible && !!siteModelUrl
-    );
-    console.log('terrain   mode=%s  url=%s → render=%s', terrainMode, terrainUrl ?? '—', !!terrainUrl);
-    console.log(`${TAG} point cloud SSE=${tilesetSse.toFixed(1)} cacheMB=${(tilesetCacheBytes / 1024 / 1024).toFixed(0)}`);
-    console.groupEnd();
-  }, [
-    layers,
-    terrainMode,
-    orthoUrl,
-    pointCloudTilesetUrl,
-    vectorUrl,
-    siteModelUrl,
-    terrainUrl,
-    tilesetSse,
-    tilesetCacheBytes,
-  ]);
-
-  const basemapProvider = useMemo(() => {
-    console.log(`${TAG} creating basemap provider (Carto Light)`);
-    return new UrlTemplateImageryProvider({
-      url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-      subdomains: 'abcd',
-      minimumLevel: 0,
-      maximumLevel: 19,
-      credit: '© OpenStreetMap contributors © CARTO',
-    });
-  }, []);
-
-  const orthoProvider = useMemo(() => {
-    if (!orthoUrl) {
-      console.log(`${TAG} orthoProvider — skipped (no URL)`);
-      return null;
-    }
-    console.log(`${TAG} creating ortho provider →`, orthoUrl);
-    return new UrlTemplateImageryProvider({
-      url: orthoUrl,
-      minimumLevel: 14,
-      maximumLevel: 22,
-      rectangle: Rectangle.fromDegrees(152.40, -32.08, 152.43, -32.04),
-    });
-  }, [orthoUrl]);
-
-  const terrainProviderPromise = useMemo(() => {
-    if (!terrainUrl) {
-      console.log(`${TAG} terrainProvider — skipped (no URL)`);
-      return undefined;
-    }
-    console.log(`${TAG} creating terrain provider →`, terrainUrl);
-    const p = CesiumTerrainProvider.fromUrl(terrainUrl);
-    p.then(
-      (tp) =>
-        console.log(
-          `${TAG} terrain provider ready — scheme:`,
-          (tp as unknown as Record<string, unknown>).tilingScheme?.constructor?.name ?? 'unknown'
-        ),
-      (err) => console.error(`${TAG} terrain provider FAILED`, err)
-    );
-    return p;
-  }, [terrainUrl]);
-
-  const initialDestination = useMemo(
-    () => Cartesian3.fromDegrees(SITE_CENTER_LNG, SITE_CENTER_LAT, 3000),
-    []
-  );
-  const initialOrientation = useMemo(
-    () => ({ heading: CesiumMath.toRadians(0), pitch: CesiumMath.toRadians(-30), roll: 0 }),
-    []
-  );
-
-  const hiddenCreditContainer = useMemo(() => {
-    if (typeof document === 'undefined') return undefined;
-    const el = document.createElement('div');
-    el.setAttribute('aria-hidden', 'true');
-    el.style.cssText =
-      'position:fixed;left:-9999px;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;';
-    return el;
-  }, []);
-
-  const handlePointCloudReady = useCallback(
-    (tileset: import('cesium').Cesium3DTileset) => {
-      console.log(
-        `${TAG} Cesium3DTileset ready — root geometric error:`,
-        tileset.root?.geometricError
-      );
-      try {
-        tileset.pointCloudShading.attenuation = true;
-        tileset.pointCloudShading.eyeDomeLighting = true;
-        tileset.pointCloudShading.eyeDomeLightingStrength = 0.6;
-      } catch (e) {
-        console.warn(`${TAG} pointCloudShading tweak skipped`, e);
-      }
-
-      const viewer = cesiumRef.current;
-      if (!viewer || viewer.isDestroyed()) return;
-      const key = pointCloudTilesetUrl ?? '';
-      if (pointCloudZoomedRef.current === key) return;
-      // Avoid fighting the site-model camera when both layers are on
-      const siteOn =
-        !!siteModelUrl && layers.site_model.visible && layers.site_model.opacity > 0.02;
-      if (siteOn) {
-        console.log(`${TAG} skipping point-cloud auto-zoom (site model visible)`);
-        return;
-      }
-      pointCloudZoomedRef.current = key;
-
-      try {
-        const sphere = tileset.boundingSphere;
-        if (defined(sphere)) {
-          viewer.camera.flyToBoundingSphere(sphere, { duration: 1.5 });
-        } else {
-          void viewer.zoomTo(tileset);
-        }
-      } catch (e) {
-        console.warn(`${TAG} zoomTo tileset failed`, e);
-      }
-    },
-    [pointCloudTilesetUrl, siteModelUrl, layers.site_model.visible, layers.site_model.opacity]
-  );
+  }, [activeTool, setSelectedFeature]);
 
   return (
     <div className="relative w-full h-screen overflow-hidden flex bg-gray-900">
@@ -604,85 +603,7 @@ export default function Viewer() {
 
       <div className="flex-1 relative h-full">
         <Toolbar />
-
-        <ResiumViewer
-          ref={handleViewerRef}
-          full
-          {...(hiddenCreditContainer ? { creditContainer: hiddenCreditContainer } : {})}
-          geocoder={false}
-          homeButton={false}
-          sceneModePicker={false}
-          baseLayerPicker={false}
-          navigationHelpButton={false}
-          animation={false}
-          timeline={false}
-          selectionIndicator={false}
-          infoBox={false}
-          baseLayer={false as unknown as import('cesium').ImageryLayer}
-          terrainProvider={terrainProviderPromise as Promise<import('cesium').TerrainProvider> | undefined}
-        >
-          <CameraFlyTo
-            destination={initialDestination}
-            orientation={initialOrientation}
-            duration={0}
-          />
-
-          <ImageryLayer imageryProvider={basemapProvider} />
-
-          {layers.ortho.visible && orthoProvider && (
-            <ImageryLayer imageryProvider={orthoProvider} alpha={layers.ortho.opacity} />
-          )}
-
-          {layers.laz.visible && pointCloudTilesetUrl && (
-            <Cesium3DTileset
-              key={`pc-${pointCloudTilesetUrl}`}
-              url={pointCloudTilesetUrl}
-              show={layers.laz.visible}
-              maximumScreenSpaceError={tilesetSse}
-              cacheBytes={tilesetCacheBytes}
-              style={pointCloudStyle}
-              onReady={handlePointCloudReady}
-              onTileFailed={(e) => console.error(`${TAG} Cesium3DTileset tile failed`, e)}
-            />
-          )}
-
-          {layers.polygons.visible && vectorUrl && (
-            <GeoJsonDataSource
-              data={vectorUrl}
-              stroke={Color.fromCssColorString('#ef4444')}
-              fill={Color.fromCssColorString('#ef4444').withAlpha(layers.polygons.opacity * 0.35)}
-              strokeWidth={2}
-              clampToGround
-              onLoad={(ds) => {
-                console.log(`${TAG} GeoJsonDataSource loaded — entities:`, ds.entities.values.length);
-                ds.entities.values.forEach((entity) => {
-                  (entity as unknown as Record<string, unknown>)['_geoJsonProperties'] =
-                    entity.properties;
-                });
-              }}
-              onError={(e) => console.error(`${TAG} GeoJsonDataSource error`, e)}
-            />
-          )}
-
-          {siteModelVisible && siteModelUrl && (
-            <Model
-              key={`sm-${siteModelUrl}`}
-              url={siteModelUrl}
-              modelMatrix={siteModelMatrix}
-              scale={1}
-              minimumPixelSize={128}
-              maximumScale={50000}
-              color={siteModelColor}
-              colorBlendMode={ColorBlendMode.MIX}
-              colorBlendAmount={1}
-              incrementallyLoadTextures
-              show
-              onReady={handleSiteModelReady}
-              onError={handleSiteModelError}
-            />
-          )}
-        </ResiumViewer>
-
+        <div ref={containerRef} className="absolute inset-0 w-full h-full outline-none" tabIndex={0} />
         <InspectorPanel />
       </div>
     </div>

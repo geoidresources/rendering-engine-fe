@@ -7,10 +7,6 @@ export const LayerPanel: React.FC = () => {
     layers,
     setLayerVisibility,
     setLayerOpacity,
-    pointBudget,
-    setPointBudget,
-    terrainExaggeration,
-    setTerrainExaggeration,
   } = useViewerStore();
 
   return (
@@ -103,64 +99,6 @@ export const LayerPanel: React.FC = () => {
           );
         })}
 
-        <div className="mt-6 pt-4 border-t border-gray-200">
-          <div className="flex items-center gap-2 mb-4">
-            <Settings2 className="w-4 h-4 text-gray-600" />
-            <h3 className="text-sm font-semibold text-gray-800">Performance & Display</h3>
-          </div>
-
-          <div className="space-y-4">
-            <div
-              className="bg-gray-50 rounded-lg p-3 border border-gray-100"
-              title="Higher budget uses lower screen-space error and a larger tile cache so more point tiles stay loaded (uses more GPU memory)."
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-700">Point budget</span>
-                <span className="text-xs text-gray-500">{(pointBudget / 1_000_000).toFixed(1)}M</span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={Math.round((Math.log10(pointBudget / 100_000) / Math.log10(100)) * 100)}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  const newBudget = Math.round(100_000 * Math.pow(100, val / 100));
-                  setPointBudget(newBudget);
-                }}
-                aria-label="Point cloud quality budget"
-                aria-valuenow={pointBudget}
-                aria-valuemin={100_000}
-                aria-valuemax={10_000_000}
-                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-
-            <div
-              className="bg-gray-50 rounded-lg p-3 border border-gray-100"
-              title="Scales terrain height relative to the ellipsoid. Values above 1× make relief easier to see on flat sites."
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-gray-700">Terrain exaggeration</span>
-                <span className="text-xs text-gray-500">{terrainExaggeration}x</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="5"
-                step="0.1"
-                value={terrainExaggeration}
-                onChange={(e) => setTerrainExaggeration(parseFloat(e.target.value))}
-                aria-label="Terrain vertical exaggeration"
-                aria-valuenow={terrainExaggeration}
-                aria-valuemin={1}
-                aria-valuemax={5}
-                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
