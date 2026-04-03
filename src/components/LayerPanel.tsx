@@ -7,12 +7,6 @@ export const LayerPanel: React.FC = () => {
     layers,
     setLayerVisibility,
     setLayerOpacity,
-    pointBudget,
-    setPointBudget,
-    terrainExaggeration,
-    setTerrainExaggeration,
-    blendPreset,
-    setBlendPreset,
   } = useViewerStore();
 
   return (
@@ -149,72 +143,6 @@ export const LayerPanel: React.FC = () => {
           );
         })}
 
-        <div className="mt-6 pt-4 border-t border-zinc-200/70 dark:border-zinc-800/70">
-          <div className="flex items-center gap-2 mb-4">
-            <Settings2 className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Performance & Display</h3>
-          </div>
-
-          <div className="space-y-4">
-            <div
-              className="rounded-xl p-3 border border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50/80 dark:bg-zinc-900/50"
-              title="Higher budget uses lower screen-space error and a larger tile cache so more point tiles stay loaded (uses more GPU memory)."
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-100">
-                  Point budget
-                </span>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {(pointBudget / 1_000_000).toFixed(1)}M
-                </span>
-              </div>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={Math.round((Math.log10(pointBudget / 100_000) / Math.log10(100)) * 100)}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  const newBudget = Math.round(100_000 * Math.pow(100, val / 100));
-                  setPointBudget(newBudget);
-                }}
-                aria-label="Point cloud quality budget"
-                aria-valuenow={pointBudget}
-                aria-valuemin={100_000}
-                aria-valuemax={10_000_000}
-                className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:accent-blue-400"
-              />
-            </div>
-
-            <div
-              className="rounded-xl p-3 border border-zinc-200/70 dark:border-zinc-800/70 bg-zinc-50/80 dark:bg-zinc-900/50"
-              title="Scales terrain height relative to the ellipsoid. Values above 1× make relief easier to see on flat sites."
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-100">
-                  Terrain exaggeration
-                </span>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                  {terrainExaggeration}x
-                </span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="5"
-                step="0.1"
-                value={terrainExaggeration}
-                onChange={(e) => setTerrainExaggeration(parseFloat(e.target.value))}
-                aria-label="Terrain vertical exaggeration"
-                aria-valuenow={terrainExaggeration}
-                aria-valuemin={1}
-                aria-valuemax={5}
-                className="w-full h-1.5 bg-zinc-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:accent-blue-400"
-              />
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -121,11 +121,27 @@ const initialCameraState: CesiumCameraState = {
   roll: 0,
 };
 
-const initialMeasurement: MeasurementState = {
-  tool: null,
-  status: 'idle',
-  points: [],
-};
+function cameraFromBounds(manifest: Manifest): CesiumCameraState | null {
+  const bounds = manifest.bounds;
+  if (!bounds) return null;
+  const centerLon = (bounds.west + bounds.east) / 2;
+  const centerLat = (bounds.south + bounds.north) / 2;
+  const spanDeg = Math.max(
+    Math.abs(bounds.east - bounds.west),
+    Math.abs(bounds.north - bounds.south),
+    0.002
+  );
+  const baseHeight = Math.max(1200, spanDeg * 160000);
+  const scale = manifest.rendering?.suggestedViewHeightScale ?? 1;
+  return {
+    longitude: centerLon,
+    latitude: centerLat,
+    height: baseHeight * scale,
+    heading: 0,
+    pitch: -0.5,
+    roll: 0,
+  };
+}
 
 export const useViewerStore = create<ViewerState>((set, get) => ({
   manifest: null,
@@ -134,10 +150,20 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     try {
       const baseUrl = id.includes('?') ? id.split('?')[0] : id;
       const query = id.includes('?') ? '?' + id.split('?')[1] : '';
-      const response = await fetch(`http://localhost:8080/api/manifests/${baseUrl}${query}`);
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
+      const response = await fetch(`${apiBase}/api/manifests/${baseUrl}${query}`);
       if (!response.ok) throw new Error('Failed to load manifest');
-      const manifest = await response.json();
-      set({ manifest });
+      const manifest = (await response.json()) as Manifest;
+      const nextState: Partial<ViewerState> = { manifest };
+      const cameraFromManifest = cameraFromBounds(manifest);
+      if (cameraFromManifest) {
+        nextState.cameraState = cameraFromManifest;
+      }
+      const defaultTerrainExaggeration = manifest.rendering?.terrainExaggeration;
+      if (typeof defaultTerrainExaggeration === 'number' && Number.isFinite(defaultTerrainExaggeration)) {
+        nextState.terrainExaggeration = defaultTerrainExaggeration;
+      }
+      set(nextState as Pick<ViewerState, 'manifest' | 'cameraState' | 'terrainExaggeration'>);
     } catch (error) {
       console.error('Error loading manifest:', error);
     }
@@ -160,7 +186,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   terrainMode: 'dtm',
   activeTool: 'select',
 
-  pointBudget: 2000000,
+  pointBudget: 5000000,
   setPointBudget: (budget) => set({ pointBudget: budget }),
 
   terrainExaggeration: 1,
