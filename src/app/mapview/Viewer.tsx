@@ -37,11 +37,11 @@ import {
 } from 'cesium';
 
 // We do not import resium anymore
-import { useViewerStore } from '../store/viewerStore';
-import { LayerPanel } from './LayerPanel';
-import { Toolbar } from './Toolbar';
-import { InspectorPanel } from './InspectorPanel';
-import { fetchMockAreaDetails } from '../lib/mockAreaDetails';
+import { useViewerStore } from '../../store/viewerStore';
+import { LayerPanel } from '../../components/LayerPanel';
+import { Toolbar } from '../../components/Toolbar';
+import { InspectorPanel } from '../../components/InspectorPanel';
+import { fetchMockAreaDetails } from '../../lib/mockAreaDetails';
 
 Ion.defaultAccessToken = '';
 
@@ -211,7 +211,7 @@ export default function Viewer() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<CesiumViewer | null>(null);
-  
+
   // Layer Refs to manage primitives iteratively
   const baseMapLayerRef = useRef<ImageryLayer | null>(null);
   const orthoLayerRef = useRef<ImageryLayer | null>(null);
@@ -219,7 +219,7 @@ export default function Viewer() {
   const vectorDataSourceRef = useRef<GeoJsonDataSource | null>(null);
   const modelPrimitiveRef = useRef<CesiumModel | null>(null);
   const pickHandlerRef = useRef<ScreenSpaceEventHandler | null>(null);
-  
+
   const siteModelAnchor = useMemo(() => manifest?.anchors?.find((a) => a.name === 'site_model'), [manifest]);
   const boundsCenterLng = manifest?.bounds ? (manifest.bounds.west + manifest.bounds.east) / 2 : undefined;
   const boundsCenterLat = manifest?.bounds ? (manifest.bounds.south + manifest.bounds.north) / 2 : undefined;
@@ -249,7 +249,7 @@ export default function Viewer() {
   // ---- Initialize the Pure Cesium Viewer ----
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
-    
+
     // Hide standard credit display elements to clean up DOM 
     const creditContainer = document.createElement('div');
     creditContainer.style.display = 'none';
@@ -275,8 +275,8 @@ export default function Viewer() {
     viewer.scene.logarithmicDepthBuffer = true;
     viewer.scene.fog.enabled = false;
     if (viewer.scene.skyAtmosphere) {
-        viewer.scene.skyAtmosphere.show = true;
-        viewer.scene.skyAtmosphere.brightnessShift = -0.1;
+      viewer.scene.skyAtmosphere.show = true;
+      viewer.scene.skyAtmosphere.brightnessShift = -0.1;
     }
     viewer.scene.globe.enableLighting = false;
     viewer.scene.globe.showGroundAtmosphere = false;
@@ -296,8 +296,8 @@ export default function Viewer() {
     // Track Context Loss
     const canvas = viewer.canvas;
     const ctxLossHandler = (e: Event) => {
-        e.preventDefault();
-        console.error(`${TAG} WebGL Context Lost! You may need to refresh or reduce point budget.`);
+      e.preventDefault();
+      console.error(`${TAG} WebGL Context Lost! You may need to refresh or reduce point budget.`);
     };
     canvas.addEventListener('webglcontextlost', ctxLossHandler);
 
@@ -313,14 +313,14 @@ export default function Viewer() {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !manifest || initialFrameDone.current) return;
-    
+
     initialFrameDone.current = true;
     const centerLon = boundsCenterLng ?? DEFAULT_SITE_CENTER_LNG;
     const centerLat = boundsCenterLat ?? DEFAULT_SITE_CENTER_LAT;
     const spanDeg = manifest.bounds ? Math.max(Math.abs(manifest.bounds.east - manifest.bounds.west), Math.abs(manifest.bounds.north - manifest.bounds.south), 0.002) : 0.02;
     const baseHeight = Math.max(1200, spanDeg * 160000);
     const scale = manifest.rendering?.suggestedViewHeightScale ?? 1;
-    
+
     viewer.camera.flyTo({
       destination: Cartesian3.fromDegrees(centerLon, centerLat, baseHeight * scale),
       orientation: { heading: 0, pitch: CesiumMath.toRadians(-30), roll: 0 },
@@ -388,7 +388,7 @@ export default function Viewer() {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
-    
+
     if (!orthoUrl || !layers.ortho.visible) {
       if (orthoLayerRef.current) {
         orthoLayerRef.current.show = false;
@@ -398,18 +398,18 @@ export default function Viewer() {
     }
 
     if (!orthoLayerRef.current) {
-        const provider = new UrlTemplateImageryProvider({
-          url: orthoUrl,
-          minimumLevel: orthoAsset?.minZoom ?? 14,
-          maximumLevel: orthoAsset?.maxZoom ?? 22,
-          rectangle: manifest?.bounds
-            ? Rectangle.fromDegrees(manifest.bounds.west, manifest.bounds.south, manifest.bounds.east, manifest.bounds.north)
-            : Rectangle.fromDegrees(152.4, -32.08, 152.43, -32.04),
-        });
-        const clayer = viewer.scene.imageryLayers.addImageryProvider(provider);
-        orthoLayerRef.current = clayer;
+      const provider = new UrlTemplateImageryProvider({
+        url: orthoUrl,
+        minimumLevel: orthoAsset?.minZoom ?? 14,
+        maximumLevel: orthoAsset?.maxZoom ?? 22,
+        rectangle: manifest?.bounds
+          ? Rectangle.fromDegrees(manifest.bounds.west, manifest.bounds.south, manifest.bounds.east, manifest.bounds.north)
+          : Rectangle.fromDegrees(152.4, -32.08, 152.43, -32.04),
+      });
+      const clayer = viewer.scene.imageryLayers.addImageryProvider(provider);
+      orthoLayerRef.current = clayer;
     }
-    
+
     orthoLayerRef.current.show = true;
     orthoLayerRef.current.alpha = layers.ortho.opacity;
     viewer.scene.requestRender();
@@ -427,76 +427,76 @@ export default function Viewer() {
       }
       // Report issues if invisible due to missing url
       if (layers.laz.visible && !pointCloudTilesetUrl) {
-          setLayerError('laz', 'No 3D Tiles URL found in manifest.');
+        setLayerError('laz', 'No 3D Tiles URL found in manifest.');
       }
       return;
     } else {
-        setLayerError('laz', null);
+      setLayerError('laz', null);
     }
 
     let isSubscribed = true;
 
     if (!tilesetRef.current || (tilesetRef.current as any)._url !== pointCloudTilesetUrl) {
-        if (tilesetRef.current) {
-           viewer.scene.primitives.remove(tilesetRef.current);
-           tilesetRef.current = null;
-        }
-        setLayerLoading('laz', true);
+      if (tilesetRef.current) {
+        viewer.scene.primitives.remove(tilesetRef.current);
+        tilesetRef.current = null;
+      }
+      setLayerLoading('laz', true);
 
-        Cesium3DTileset.fromUrl(pointCloudTilesetUrl, {
-            maximumScreenSpaceError: pointBudgetToMaximumScreenSpaceError(pointBudget),
-            cacheBytes: pointBudgetToCacheBytes(pointBudget),
-            pointCloudShading: {
-                attenuation: true,
-                eyeDomeLighting: true,
-                eyeDomeLightingStrength: 1.0,
-                maximumAttenuation: 4,
-                geometricErrorScale: 1.0,
-            }
-        }).then(tileset => {
-            if (!viewer.isDestroyed() && isSubscribed) {
-                // Detect geographic coords in root transform (PDAL cesium writer outputs lat/lon/height instead of ECEF)
-                const rootTransform = tileset.root.transform;
-                const translation = Matrix4.getTranslation(rootTransform, new Cartesian3());
-                const magnitude = Cartesian3.magnitude(translation);
-                if (magnitude > 0 && magnitude < 100000) {
-                    const lat = translation.x;
-                    const lon = translation.y;
-                    const height = translation.z;
-                    const ecefCenter = Cartesian3.fromDegrees(lon, lat, height);
-                    const enuToEcef = Transforms.eastNorthUpToFixedFrame(ecefCenter);
-                    const mPerDegLat = 111132.0;
-                    const mPerDegLon = 111132.0 * Math.cos(CesiumMath.toRadians(lat));
-                    // local x (lat offset) → North, local y (lon offset) → East, local z → Up
-                    const localToEnu = new Matrix4(
-                        0,          mPerDegLon, 0, 0,
-                        mPerDegLat, 0,          0, 0,
-                        0,          0,          1, 0,
-                        0,          0,          0, 1,
-                    );
-                    tileset.root.transform = Matrix4.IDENTITY;
-                    tileset.modelMatrix = Matrix4.multiply(enuToEcef, localToEnu, new Matrix4());
-                    console.info(`${TAG} Corrected geographic root transform → ECEF (lat=${lat.toFixed(4)}, lon=${lon.toFixed(4)})`);
-                }
-                viewer.scene.primitives.add(tileset);
-                tilesetRef.current = tileset;
-                tileset.show = layers.laz.visible;
-                tileset.style = buildPointCloudStyle(layers.laz.opacity) as any;
-                setLayerLoading('laz', false);
-                viewer.scene.requestRender();
-            }
-        }).catch(e => {
-            console.error(`${TAG} Failed to load point cloud`, e);
-            if (isSubscribed) {
-                setLayerError('laz', 'Failed to load point cloud. Check network tab.');
-                setLayerLoading('laz', false);
-            }
-        });
+      Cesium3DTileset.fromUrl(pointCloudTilesetUrl, {
+        maximumScreenSpaceError: pointBudgetToMaximumScreenSpaceError(pointBudget),
+        cacheBytes: pointBudgetToCacheBytes(pointBudget),
+        pointCloudShading: {
+          attenuation: true,
+          eyeDomeLighting: true,
+          eyeDomeLightingStrength: 1.0,
+          maximumAttenuation: 4,
+          geometricErrorScale: 1.0,
+        }
+      }).then(tileset => {
+        if (!viewer.isDestroyed() && isSubscribed) {
+          // Detect geographic coords in root transform (PDAL cesium writer outputs lat/lon/height instead of ECEF)
+          const rootTransform = tileset.root.transform;
+          const translation = Matrix4.getTranslation(rootTransform, new Cartesian3());
+          const magnitude = Cartesian3.magnitude(translation);
+          if (magnitude > 0 && magnitude < 100000) {
+            const lat = translation.x;
+            const lon = translation.y;
+            const height = translation.z;
+            const ecefCenter = Cartesian3.fromDegrees(lon, lat, height);
+            const enuToEcef = Transforms.eastNorthUpToFixedFrame(ecefCenter);
+            const mPerDegLat = 111132.0;
+            const mPerDegLon = 111132.0 * Math.cos(CesiumMath.toRadians(lat));
+            // local x (lat offset) → North, local y (lon offset) → East, local z → Up
+            const localToEnu = new Matrix4(
+              0, mPerDegLon, 0, 0,
+              mPerDegLat, 0, 0, 0,
+              0, 0, 1, 0,
+              0, 0, 0, 1,
+            );
+            tileset.root.transform = Matrix4.IDENTITY;
+            tileset.modelMatrix = Matrix4.multiply(enuToEcef, localToEnu, new Matrix4());
+            console.info(`${TAG} Corrected geographic root transform → ECEF (lat=${lat.toFixed(4)}, lon=${lon.toFixed(4)})`);
+          }
+          viewer.scene.primitives.add(tileset);
+          tilesetRef.current = tileset;
+          tileset.show = layers.laz.visible;
+          tileset.style = buildPointCloudStyle(layers.laz.opacity) as any;
+          setLayerLoading('laz', false);
+          viewer.scene.requestRender();
+        }
+      }).catch(e => {
+        console.error(`${TAG} Failed to load point cloud`, e);
+        if (isSubscribed) {
+          setLayerError('laz', 'Failed to load point cloud. Check network tab.');
+          setLayerLoading('laz', false);
+        }
+      });
     } else {
-        tilesetRef.current.show = true;
-        tilesetRef.current.style = buildPointCloudStyle(layers.laz.opacity) as any;
-        tilesetRef.current.maximumScreenSpaceError = pointBudgetToMaximumScreenSpaceError(pointBudget);
-        viewer.scene.requestRender();
+      tilesetRef.current.show = true;
+      tilesetRef.current.style = buildPointCloudStyle(layers.laz.opacity) as any;
+      tilesetRef.current.maximumScreenSpaceError = pointBudgetToMaximumScreenSpaceError(pointBudget);
+      viewer.scene.requestRender();
     }
 
     return () => { isSubscribed = false; };
@@ -507,18 +507,18 @@ export default function Viewer() {
     const viewer = viewerRef.current;
     if (!viewer) return;
     const updateEDL = () => {
-        const ts = tilesetRef.current;
-        if (!ts || !ts.show) return;
-        const camDist = viewer.camera.positionCartographic.height;
-        // As you get closer, strengthen the EDL outlines
-        if (ts.pointCloudShading) {
-            let strength = 0.5;
-            let radius = 1.0;
-            if (camDist < 500) { strength = 1.5; radius = 2.0; } 
-            else if (camDist < 2000) { strength = 1.0; radius = 1.5; }
-            ts.pointCloudShading.eyeDomeLightingStrength = strength;
-            ts.pointCloudShading.eyeDomeLightingRadius = radius;
-        }
+      const ts = tilesetRef.current;
+      if (!ts || !ts.show) return;
+      const camDist = viewer.camera.positionCartographic.height;
+      // As you get closer, strengthen the EDL outlines
+      if (ts.pointCloudShading) {
+        let strength = 0.5;
+        let radius = 1.0;
+        if (camDist < 500) { strength = 1.5; radius = 2.0; }
+        else if (camDist < 2000) { strength = 1.0; radius = 1.5; }
+        ts.pointCloudShading.eyeDomeLightingStrength = strength;
+        ts.pointCloudShading.eyeDomeLightingRadius = radius;
+      }
     };
     viewer.scene.preRender.addEventListener(updateEDL);
     return () => { viewer.scene.preRender.removeEventListener(updateEDL); };
@@ -539,32 +539,32 @@ export default function Viewer() {
 
     let isSubscribed = true;
     if (!vectorDataSourceRef.current) {
-        setLayerLoading('polygons', true);
-        GeoJsonDataSource.load(vectorUrl, {
-            stroke: Color.fromCssColorString('#ef4444'),
-            fill: Color.fromCssColorString('#ef4444').withAlpha(layers.polygons.opacity * 0.35),
-            strokeWidth: 2,
-            clampToGround: true,
-        }).then(ds => {
-            if (!viewer.isDestroyed() && isSubscribed) {
-                viewer.dataSources.add(ds);
-                vectorDataSourceRef.current = ds;
-                ds.entities.values.forEach((entity) => {
-                  (entity as any)['_geoJsonProperties'] = entity.properties;
-                });
-                setLayerLoading('polygons', false);
-                viewer.scene.requestRender();
-            }
-        }).catch(e => {
-            console.error(`${TAG} Failed to load GeoJSON`, e);
-            if (isSubscribed) {
-                setLayerError('polygons', 'Failed to load vector data.');
-                setLayerLoading('polygons', false);
-            }
-        });
+      setLayerLoading('polygons', true);
+      GeoJsonDataSource.load(vectorUrl, {
+        stroke: Color.fromCssColorString('#ef4444'),
+        fill: Color.fromCssColorString('#ef4444').withAlpha(layers.polygons.opacity * 0.35),
+        strokeWidth: 2,
+        clampToGround: true,
+      }).then(ds => {
+        if (!viewer.isDestroyed() && isSubscribed) {
+          viewer.dataSources.add(ds);
+          vectorDataSourceRef.current = ds;
+          ds.entities.values.forEach((entity) => {
+            (entity as any)['_geoJsonProperties'] = entity.properties;
+          });
+          setLayerLoading('polygons', false);
+          viewer.scene.requestRender();
+        }
+      }).catch(e => {
+        console.error(`${TAG} Failed to load GeoJSON`, e);
+        if (isSubscribed) {
+          setLayerError('polygons', 'Failed to load vector data.');
+          setLayerLoading('polygons', false);
+        }
+      });
     } else {
-        vectorDataSourceRef.current.show = true;
-        viewer.scene.requestRender();
+      vectorDataSourceRef.current.show = true;
+      viewer.scene.requestRender();
     }
 
     return () => { isSubscribed = false; };
@@ -572,69 +572,69 @@ export default function Viewer() {
 
   // ---- GLB Site Model ---
   useEffect(() => {
-      const viewer = viewerRef.current;
-      if (!viewer) return;
+    const viewer = viewerRef.current;
+    if (!viewer) return;
 
-      const visible = !!siteModelUrl && layers.site_model.visible && layers.site_model.opacity > 0.02;
-      
-      if (!visible || !siteModelUrl) {
-          if (modelPrimitiveRef.current) {
-              modelPrimitiveRef.current.show = false;
-              viewer.scene.requestRender();
+    const visible = !!siteModelUrl && layers.site_model.visible && layers.site_model.opacity > 0.02;
+
+    if (!visible || !siteModelUrl) {
+      if (modelPrimitiveRef.current) {
+        modelPrimitiveRef.current.show = false;
+        viewer.scene.requestRender();
+      }
+      return;
+    }
+
+    setLayerLoading('site_model', true);
+
+    const sampleAndPlace = async () => {
+      let h = siteCenterHeight;
+      const tp = viewer.terrainProvider;
+      if (tp && !(tp instanceof EllipsoidTerrainProvider)) {
+        try {
+          const updated = await sampleTerrainMostDetailed(tp, [Cartographic.fromDegrees(siteCenterLng, siteCenterLat)]);
+          if (updated?.[0]?.height !== undefined) {
+            h = updated[0].height + 12; // slight offset
           }
-          return;
+        } catch (e) {
+          // Fallback to default
+        }
       }
 
-      setLayerLoading('site_model', true);
+      if (viewer.isDestroyed()) return;
 
-      const sampleAndPlace = async () => {
-          let h = siteCenterHeight;
-          const tp = viewer.terrainProvider;
-          if (tp && !(tp instanceof EllipsoidTerrainProvider)) {
-              try {
-                  const updated = await sampleTerrainMostDetailed(tp, [Cartographic.fromDegrees(siteCenterLng, siteCenterLat)]);
-                  if (updated?.[0]?.height !== undefined) {
-                      h = updated[0].height + 12; // slight offset
-                  }
-              } catch (e) {
-                  // Fallback to default
-              }
-          }
-          
+      const modelMatrix = Transforms.eastNorthUpToFixedFrame(Cartesian3.fromDegrees(siteCenterLng, siteCenterLat, h));
+      const color = Color.WHITE.withAlpha(Math.max(0, Math.min(1, layers.site_model.opacity)));
+
+      if (!modelPrimitiveRef.current) {
+        CesiumModel.fromGltfAsync({
+          url: siteModelUrl,
+          modelMatrix: modelMatrix,
+          color: color,
+          colorBlendMode: ColorBlendMode.MIX,
+          colorBlendAmount: 1,
+        }).then(model => {
           if (viewer.isDestroyed()) return;
+          viewer.scene.primitives.add(model);
+          modelPrimitiveRef.current = model;
+          model.show = layers.site_model.visible;
+          setLayerLoading('site_model', false);
+          viewer.scene.requestRender();
+        }).catch(e => {
+          console.error("Failed to load model", e);
+          setLayerError('site_model', 'Failed to load model');
+          setLayerLoading('site_model', false);
+        });
+      } else {
+        modelPrimitiveRef.current.show = true;
+        modelPrimitiveRef.current.modelMatrix = modelMatrix;
+        modelPrimitiveRef.current.color = color;
+        setLayerLoading('site_model', false);
+        viewer.scene.requestRender();
+      }
+    };
 
-          const modelMatrix = Transforms.eastNorthUpToFixedFrame(Cartesian3.fromDegrees(siteCenterLng, siteCenterLat, h));
-          const color = Color.WHITE.withAlpha(Math.max(0, Math.min(1, layers.site_model.opacity)));
-
-          if (!modelPrimitiveRef.current) {
-               CesiumModel.fromGltfAsync({
-                   url: siteModelUrl,
-                   modelMatrix: modelMatrix,
-                   color: color,
-                   colorBlendMode: ColorBlendMode.MIX,
-                   colorBlendAmount: 1,
-               }).then(model => {
-                   if (viewer.isDestroyed()) return;
-                   viewer.scene.primitives.add(model);
-                   modelPrimitiveRef.current = model;
-                   model.show = layers.site_model.visible;
-                   setLayerLoading('site_model', false);
-                   viewer.scene.requestRender();
-               }).catch(e => {
-                   console.error("Failed to load model", e);
-                   setLayerError('site_model', 'Failed to load model');
-                   setLayerLoading('site_model', false);
-               });
-          } else {
-               modelPrimitiveRef.current.show = true;
-               modelPrimitiveRef.current.modelMatrix = modelMatrix;
-               modelPrimitiveRef.current.color = color;
-               setLayerLoading('site_model', false);
-               viewer.scene.requestRender();
-          }
-      };
-
-      sampleAndPlace();
+    sampleAndPlace();
   }, [siteModelUrl, layers.site_model.visible, layers.site_model.opacity, terrainMode, terrainUrl, siteCenterLng, siteCenterLat, siteCenterHeight, setLayerLoading, setLayerError]);
 
   // ---- Interaction Picker ----
@@ -643,9 +643,9 @@ export default function Viewer() {
     if (!viewer || activeTool !== 'select') return;
 
     if (pickHandlerRef.current) {
-        pickHandlerRef.current.destroy();
+      pickHandlerRef.current.destroy();
     }
-    
+
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
     pickHandlerRef.current = handler;
 
@@ -709,10 +709,10 @@ export default function Viewer() {
     }, ScreenSpaceEventType.LEFT_CLICK);
 
     return () => {
-       if (pickHandlerRef.current) {
-           pickHandlerRef.current.destroy();
-           pickHandlerRef.current = null;
-       }
+      if (pickHandlerRef.current) {
+        pickHandlerRef.current.destroy();
+        pickHandlerRef.current = null;
+      }
     };
   }, [activeTool, setSelectedFeature]);
 
