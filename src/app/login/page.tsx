@@ -6,6 +6,11 @@ import Link from "next/link";
 import { FiEye, FiEyeOff } from "react-icons/fi";
 import { FaApple, FaGoogle, FaWindows } from "react-icons/fa";
 import { ThemeSwitcher } from "@/components/ui/ThemeSwitcher";
+import { useMutation } from "@tanstack/react-query";
+import { loginUser } from "./api";
+import { toast } from "sonner";
+import type { LoginFormErrors } from "./type";
+import { AUTH_TOKEN_KEY, AUTH_SESSION_KEY } from "@/lib/constants";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,31 +18,39 @@ export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [fieldErrors, setFieldErrors] = useState<LoginFormErrors>({});
 
-  function validate() {
-    const errs: { email?: string; password?: string } = {};
+  const loginMutation = useMutation({
+    mutationFn: loginUser,
+    onSuccess: (response) => {
+      localStorage.setItem(AUTH_TOKEN_KEY, response.token);
+      localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(response));
+      router.push("/home");
+    },
+    onError: () => {
+      toast.error("Login Failed,Check Username and Password");
+    },
+  });
+
+  const isLoading = loginMutation.isPending;
+
+
+  function validate(): LoginFormErrors {
+    const errs: LoginFormErrors = {};
     if (!email) errs.email = "Email is required";
     else if (!/\S+@\S+\.\S+/.test(email)) errs.email = "Enter a valid email";
     if (!password) errs.password = "Password is required";
     return errs;
   }
 
-  async function handleLogin() {
+  function handleLogin() {
     const errs = validate();
     if (Object.keys(errs).length) {
-      setErrors(errs);
+      setFieldErrors(errs);
       return;
     }
-
-    setErrors({});
-    setIsLoading(true);
-
-    await new Promise((r) => setTimeout(r, 600));
-
-    setIsLoading(false);
-    router.push("/home");
+    setFieldErrors({});
+    loginMutation.mutate({ email, password });
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -79,7 +92,7 @@ export default function LoginPage() {
           <div className="flex flex-col gap-5">
             {/* Unified Inputs Block (Apple-style) */}
             <div className="flex flex-col">
-              <div className={`flex flex-col bg-zinc-50 dark:bg-[#2c2c2e] rounded-xl border ${errors.email || errors.password ? "border-red-500/50" : "border-black/10 dark:border-white/10"
+              <div className={`flex flex-col bg-zinc-50 dark:bg-[#2c2c2e] rounded-xl border ${fieldErrors.email || fieldErrors.password ? "border-red-500/50" : "border-black/10 dark:border-white/10"
                 } overflow-hidden focus-within:border-black/20 dark:focus-within:border-white/30 transition-colors`}>
                 <input
                   type="email"
@@ -87,7 +100,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => {
                     setEmail(e.target.value);
-                    setErrors((prev) => ({ ...prev, email: undefined }));
+                    setFieldErrors((prev) => ({ ...prev, email: undefined }));
                   }}
                   onKeyDown={handleKeyDown}
                   className="w-full bg-transparent px-4 py-3.5 text-[15px] text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-[#8e8e93] border-b border-black/10 dark:border-white/10 outline-none focus:bg-zinc-100 dark:focus:bg-[#3a3a3c]/50 transition-colors"
@@ -99,7 +112,7 @@ export default function LoginPage() {
                     value={password}
                     onChange={(e) => {
                       setPassword(e.target.value);
-                      setErrors((prev) => ({ ...prev, password: undefined }));
+                      setFieldErrors((prev) => ({ ...prev, password: undefined }));
                     }}
                     onKeyDown={handleKeyDown}
                     className="w-full bg-transparent px-4 py-3.5 pr-11 text-[15px] text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-[#8e8e93] outline-none focus:bg-zinc-100 dark:focus:bg-[#3a3a3c]/50 transition-colors"
@@ -114,9 +127,9 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {(errors.email || errors.password) && (
+              {(fieldErrors.email || fieldErrors.password) && (
                 <div className="text-[13px] text-red-500 dark:text-red-400 mt-2 px-1 font-medium">
-                  {errors.email || errors.password}
+                  {fieldErrors.email || fieldErrors.password}
                 </div>
               )}
             </div>

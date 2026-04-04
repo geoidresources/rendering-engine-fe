@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@heroui/react";
 import { ThemeSwitcher } from "@/components/ui/ThemeSwitcher";
+import { useRouter } from "next/navigation";
+import { AUTH_TOKEN_KEY } from "@/lib/constants";
 
 const NAV_GROUPS = [
   {
@@ -179,7 +181,14 @@ const NAV_GROUPS = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
+
+  const handleSignOut = async () => {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    router.push("/login");
+
+  };
 
   return (
     <aside
@@ -265,9 +274,9 @@ export default function Sidebar() {
         <div className={`flex ${collapsed ? "justify-center" : "px-2"} w-full`}>
           <ThemeSwitcher />
         </div>
-        <Link
-          href="/login"
-          className="flex items-center gap-2.5 px-2 py-2 rounded-lg text-xs text-zinc-600 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-xs text-zinc-600 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer border-none bg-transparent"
           title={collapsed ? "Sign out" : undefined}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -276,7 +285,7 @@ export default function Sidebar() {
             <line x1="21" y1="12" x2="9" y2="12" />
           </svg>
           {!collapsed && <span>Sign out</span>}
-        </Link>
+        </button>
       </div>
     </aside>
   );
