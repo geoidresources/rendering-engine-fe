@@ -3,180 +3,44 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+import { 
+  LayoutGrid, 
+  FolderOpen, 
+  CloudUpload, 
+  Ruler, 
+  ArrowLeftRight, 
+  Map, 
+  Layers, 
+  BarChart3, 
+  Key,
+  ChevronLeft,
+  ChevronRight,
+  LogOut,
+  Settings,
+  Activity,
+  LifeBuoy
+} from "lucide-react";
+
 import { Button } from "@heroui/react";
-import { ThemeSwitcher } from "@/components/ui/ThemeSwitcher";
 import { useRouter } from "next/navigation";
 import { AUTH_TOKEN_KEY } from "@/lib/constants";
 
-const NAV_GROUPS = [
-  {
-    label: "Overview",
-    items: [
-      {
-        id: "home",
-        label: "Dashboard",
-        href: "/home",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-            <polyline points="9 22 9 12 15 12 15 22" />
-          </svg>
-        ),
-      },
-      {
-        id: "projects",
-        label: "Projects",
-        href: "/projects",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect width="7" height="7" x="3" y="3" rx="1" />
-            <rect width="7" height="7" x="14" y="3" rx="1" />
-            <rect width="7" height="7" x="14" y="14" rx="1" />
-            <rect width="7" height="7" x="3" y="14" rx="1" />
-          </svg>
-        ),
-      },
-    ],
-  },
-  {
-    label: "Surveys",
-    items: [
-      {
-        id: "surveys-upload",
-        label: "Upload & Ingest",
-        href: "/surveys/upload",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="17 8 12 3 7 8" />
-            <line x1="12" y1="3" x2="12" y2="15" />
-          </svg>
-        ),
-      },
-      {
-        id: "measurements",
-        label: "Measurements",
-        href: "/measurements",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 3v18h18" />
-            <path d="m19 9-5 5-4-4-3 3" />
-          </svg>
-        ),
-      },
-      {
-        id: "reconciliation",
-        label: "Reconciliation",
-        href: "/reconciliation",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-          </svg>
-        ),
-      },
-    ],
-  },
-  {
-    label: "Viewers",
-    items: [
-      {
-        id: "map-viewer",
-        label: "Map Viewer (2D)",
-        href: "/mapview",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
-            <line x1="9" y1="3" x2="9" y2="18" />
-            <line x1="15" y1="6" x2="15" y2="21" />
-          </svg>
-        ),
-        external: true,
-      },
-      {
-        id: "viewer-3d",
-        label: "3D Viewer",
-        href: "/viewer-3d",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-            <path d="M2 17l10 5 10-5" />
-            <path d="M2 12l10 5 10-5" />
-          </svg>
-        ),
-      },
-    ],
-  },
-  {
-    label: "Reporting",
-    items: [
-      {
-        id: "reports",
-        label: "Reports",
-        href: "/reports",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14 2 14 8 20 8" />
-            <line x1="16" y1="13" x2="8" y2="13" />
-            <line x1="16" y1="17" x2="8" y2="17" />
-            <line x1="10" y1="9" x2="8" y2="9" />
-          </svg>
-        ),
-      },
-      {
-        id: "qa",
-        label: "QA & Approval",
-        href: "/qa",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
-        ),
-      },
-    ],
-  },
-  {
-    label: "Access",
-    items: [
-      {
-        id: "client-portal",
-        label: "Client Portal",
-        href: "/client-portal",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="8" r="4" />
-            <path d="M6 20v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-          </svg>
-        ),
-      },
-      {
-        id: "users",
-        label: "Users & Roles",
-        href: "/users",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-        ),
-      },
-      {
-        id: "admin",
-        label: "Admin Panel",
-        href: "/admin",
-        icon: (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        ),
-      },
-    ],
-  },
+const NAV_ITEMS = [
+  { id: "overview", label: "OVERVIEW", href: "/home", icon: <LayoutGrid size={18} /> },
+  { id: "projects", label: "PROJECTS", href: "/projects", icon: <FolderOpen size={18} /> },
+  { id: "upload", label: "UPLOAD", href: "/surveys/upload", icon: <CloudUpload size={18} /> },
+  { id: "measurements", label: "MEASUREMENTS", href: "/measurements", icon: <Ruler size={18} /> },
+  { id: "reconciliation", label: "RECONCILIATION", href: "/reconciliation", icon: <ArrowLeftRight size={18} /> },
+  { id: "map-2d", label: "MAP 2D", href: "/mapview", icon: <Map size={18} /> },
+  { id: "map-3d", label: "MAP 3D", href: "/viewer-3d", icon: <Layers size={18} /> },
+  { id: "reporting", label: "REPORTING", href: "/reports", icon: <BarChart3 size={18} /> },
+  { id: "access", label: "ACCESS", href: "/users", icon: <Key size={18} /> },
+  { id: "settings", label: "SETTINGS", href: "/settings", icon: <Settings size={18} /> },
+];
+
+const SECONDARY_NAV = [
+  { id: "health", label: "SYSTEM HEALTH", href: "/health", icon: <Activity size={16} /> },
+  { id: "support", label: "SUPPORT", href: "/support", icon: <LifeBuoy size={16} /> },
 ];
 
 export default function Sidebar() {
@@ -184,108 +48,142 @@ export default function Sidebar() {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
 
-  const handleSignOut = async () => {
+  const handleSignOut = () => {
     localStorage.removeItem(AUTH_TOKEN_KEY);
     router.push("/login");
-
   };
 
   return (
     <aside
       className={`
-        flex flex-col h-screen bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 transition-all duration-200
-        ${collapsed ? "w-[56px]" : "w-[220px]"}
-        shrink-0
+        flex flex-col h-screen transition-all duration-300 ease-in-out border-r
+        ${collapsed ? "w-[64px]" : "w-[260px]"}
+        bg-[#0A0D12] border-zinc-800
+        shrink-0 z-50
       `}
     >
-      {/* Header */}
-      <div className="flex items-center gap-2.5 px-3 py-4 border-b border-zinc-200 dark:border-zinc-800 min-h-[56px]">
-        <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
-            <line x1="9" y1="3" x2="9" y2="18" />
-            <line x1="15" y1="6" x2="15" y2="21" />
-          </svg>
-        </div>
-        {!collapsed && (
-          <span className="text-zinc-900 dark:text-white text-sm font-semibold tracking-tight truncate">
-            GEOID
-          </span>
+      {/* Logo Header */}
+      <div className="flex flex-col px-6 py-8 min-h-[120px] gap-1 relative group">
+        {!collapsed ? (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-white text-xl font-black tracking-[0.2em] uppercase">
+                GEOID SYSTEM
+              </span>
+              <Button
+                isIconOnly
+                size="sm"
+                variant="ghost"
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-white"
+                onPress={() => setCollapsed(true)}
+              >
+                <ChevronLeft size={16} />
+              </Button>
+            </div>
+            <span className="text-[9px] font-bold tracking-[0.3em] text-[#F4B400] uppercase mt-1">
+              SUBTERRANEAN INTEL
+            </span>
+          </>
+        ) : (
+          <div className="flex flex-col items-center gap-2">
+            <span className="text-[#F4B400] text-xl font-black tracking-[0.1em]">G</span>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="ghost"
+              className="text-zinc-500 hover:text-white"
+              onPress={() => setCollapsed(false)}
+            >
+              <ChevronRight size={16} />
+            </Button>
+          </div>
         )}
-        <Button
-          isIconOnly
-          size="sm"
-          variant="primary"
-          className="ml-auto text-zinc-500 hover:text-zinc-300 w-6 h-6 min-w-fit"
-          onPress={() => setCollapsed((c) => !c)}
-          aria-label="Toggle sidebar"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {collapsed ? (
-              <><line x1="5" y1="12" x2="19" y2="12" /><polyline points="13 6 19 12 13 18" /></>
-            ) : (
-              <><line x1="19" y1="12" x2="5" y2="12" /><polyline points="11 18 5 12 11 6" /></>
-            )}
-          </svg>
-        </Button>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 flex flex-col gap-4">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label} className="flex flex-col gap-0.5">
-            {!collapsed && (
-              <span className="text-zinc-500 dark:text-zinc-600 text-[10px] font-semibold uppercase tracking-wider px-2 mb-1">
-                {group.label}
+      {/* Primary Navigation */}
+      <nav className="flex-1 overflow-y-auto px-0 py-2 flex flex-col gap-0.5 custom-scrollbar">
+        {NAV_ITEMS.map((item) => {
+          const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+          return (
+            <Link
+              key={item.id}
+              href={item.href}
+              className={`
+                flex items-center gap-4 py-3.5 px-6 transition-all relative group
+                ${isActive 
+                  ? "text-white bg-zinc-900/50" 
+                  : "text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/30"
+                }
+              `}
+              title={collapsed ? item.label : undefined}
+            >
+              {isActive && (
+                <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-[#F4B400] rounded-r-full shadow-[0_0_10px_rgba(244,180,0,0.5)]" />
+              )}
+              
+              <span className={`shrink-0 transition-colors ${isActive ? "text-[#F4B400]" : "group-hover:text-zinc-300"}`}>
+                {item.icon}
               </span>
-            )}
-            {group.items.map((item) => {
-              const isActive = item.external
-                ? false
-                : pathname === item.href || pathname.startsWith(item.href + "/");
-              return (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  className={`
-                    flex items-center gap-2.5 px-2 py-2 rounded-lg text-xs font-medium transition-colors
-                    ${isActive
-                      ? "bg-blue-600/15 text-blue-600 dark:text-blue-400"
-                      : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    }
-                  `}
-                  title={collapsed ? item.label : undefined}
-                >
-                  <span className={`shrink-0 ${isActive ? "text-blue-600 dark:text-blue-400" : "text-zinc-400 dark:text-zinc-500"}`}>
-                    {item.icon}
-                  </span>
-                  {!collapsed && (
-                    <span className="truncate">{item.label}</span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+              
+              {!collapsed && (
+                <span className="text-[11px] font-bold tracking-[0.15em] truncate uppercase">
+                  {item.label}
+                </span>
+              )}
+            </Link>
+          );
+        })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-2 py-3 border-t border-zinc-200 dark:border-zinc-800 flex flex-col gap-2">
-        <div className={`flex ${collapsed ? "justify-center" : "px-2"} w-full`}>
-          <ThemeSwitcher />
+      {/* New Survey Button Area */}
+      {!collapsed && (
+        <div className="px-6 py-6 border-t border-zinc-800/50">
+          <Link href="/surveys/new">
+            <button className="w-full bg-[#F4B400] hover:bg-[#FFC107] text-black text-[11px] font-black tracking-[0.2em] py-3.5 rounded transition-all shadow-[0_4px_20px_rgba(244,180,0,0.15)] active:scale-[0.98] uppercase">
+              NEW SURVEY
+            </button>
+          </Link>
         </div>
-        <button
-          onClick={handleSignOut}
-          className="w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-xs text-zinc-600 dark:text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer border-none bg-transparent"
-          title={collapsed ? "Sign out" : undefined}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16 17 21 12 16 7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg>
-          {!collapsed && <span>Sign out</span>}
-        </button>
+      )}
+
+      {/* Footer Nav & User Profile */}
+      <div className="mt-auto flex flex-col border-t border-zinc-800/80">
+        <div className="flex flex-col py-4">
+          {SECONDARY_NAV.map((item) => (
+             <Link
+              key={item.id}
+              href={item.href}
+              className="flex items-center gap-3 py-2.5 px-6 text-zinc-500 hover:text-zinc-200 transition-colors group"
+             >
+                <span className="shrink-0 group-hover:text-[#F4B400]">{item.icon}</span>
+                {!collapsed && (
+                  <span className="text-[10px] font-bold tracking-[0.15em] uppercase">{item.label}</span>
+                )}
+             </Link>
+          ))}
+        </div>
+
+        <div className="p-6 bg-[#0E1218] flex items-center justify-between border-t border-zinc-800/50">
+          <div className="flex items-center gap-3 overflow-hidden">
+             <div className="w-9 h-9 rounded-md bg-zinc-800 flex items-center justify-center text-[#F4B400] font-black text-sm border border-zinc-700 shrink-0">
+               OP
+             </div>
+             {!collapsed && (
+               <div className="flex flex-col min-w-0">
+                 <span className="text-[11px] font-bold text-white tracking-widest truncate uppercase">PETER_ADMIN</span>
+                 <span className="text-[9px] font-bold text-zinc-500 tracking-wider truncate uppercase">LEVEL 4 CLEARANCE</span>
+               </div>
+             )}
+          </div>
+          {!collapsed && (
+            <button 
+              onClick={handleSignOut}
+              className="p-1.5 text-zinc-500 hover:text-red-400 transition-colors"
+            >
+              <LogOut size={16} />
+            </button>
+          )}
+        </div>
       </div>
     </aside>
   );

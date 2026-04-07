@@ -343,8 +343,8 @@ export default function Viewer() {
         roll: viewer.camera.roll,
       });
     };
-    viewer.camera.moveEnd.addEventListener(handler);
-    return () => { viewer.camera.moveEnd.removeEventListener(handler); };
+    const removeListener = viewer.camera.moveEnd.addEventListener(handler);
+    return () => { removeListener(); };
   }, [setCameraState]);
 
   // ---- Terrain Provider ----
@@ -510,7 +510,6 @@ export default function Viewer() {
       const ts = tilesetRef.current;
       if (!ts || !ts.show) return;
       const camDist = viewer.camera.positionCartographic.height;
-      // As you get closer, strengthen the EDL outlines
       if (ts.pointCloudShading) {
         let strength = 0.5;
         let radius = 1.0;
@@ -520,8 +519,8 @@ export default function Viewer() {
         ts.pointCloudShading.eyeDomeLightingRadius = radius;
       }
     };
-    viewer.scene.preRender.addEventListener(updateEDL);
-    return () => { viewer.scene.preRender.removeEventListener(updateEDL); };
+    const removeListener = viewer.scene.preRender.addEventListener(updateEDL);
+    return () => { removeListener(); };
   }, []);
 
   // ---- Vector (GeoJSON) Layer ---
