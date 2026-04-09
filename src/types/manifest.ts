@@ -16,7 +16,7 @@ export interface Manifest {
 
 export interface Asset {
   id: string;
-  assetType: 'ortho' | 'terrain_dsm' | 'terrain_dtm' | 'point_cloud' | 'vector' | 'site_model';
+  assetType: 'ortho' | 'terrain_dsm' | 'terrain_dtm' | 'point_cloud' | 'vector' | 'site_model' | 'heatmap' | 'contours';
   format: 'xyz' | 'terrain-rgb' | 'quantized-mesh' | 'laz' | '3dtiles' | 'geojson' | 'glb';
   url: string;
   crs?: string;

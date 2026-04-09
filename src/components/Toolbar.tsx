@@ -1,10 +1,12 @@
 import React from 'react';
-import { MousePointer2, Ruler, Square, Hexagon, Home } from 'lucide-react';
+import { MousePointer2, Ruler, Square, Hexagon, Home, ChevronDown } from 'lucide-react';
 import Link from 'next/link';
 import { useViewerStore } from '../store/viewerStore';
+import { useProjects } from '../hooks/useProjects';
 
 export const Toolbar: React.FC = () => {
   const { terrainMode, setTerrainMode, activeTool, setActiveTool } = useViewerStore();
+  const { data: projects } = useProjects();
 
   const iconButtonBase =
     'h-9 w-9 grid place-items-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-950';
@@ -24,6 +26,18 @@ export const Toolbar: React.FC = () => {
           <Home className="w-5 h-5" />
         </button>
       </Link>
+      {/* Project selector */}
+      {projects && projects.length > 0 && (
+        <button
+          type="button"
+          className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/60 transition-colors max-w-[140px]"
+          title="Switch project"
+          aria-label="Project selector"
+        >
+          <span className="truncate">{projects[0].name}</span>
+          <ChevronDown className="w-3 h-3 shrink-0 opacity-50" />
+        </button>
+      )}
       <div className="w-px h-6 bg-zinc-200/80 dark:bg-zinc-800/80 mx-1" />
       <button
         className={`${iconButtonBase} ${activeTool === 'select' ? iconButtonActive : iconButtonIdle}`}

@@ -10,7 +10,7 @@ import {
 } from "@heroui/react";
 
 const inputVisualClass =
-  "text-white placeholder:text-zinc-600 text-sm bg-zinc-800/60 border border-zinc-700 hover:border-zinc-600 data-[focus-within=true]:border-blue-500 transition-colors";
+  "text-text-primary placeholder:text-text-muted text-sm bg-bg-elevated border border-border-subtle hover:border-text-muted data-[focus-within=true]:border-primary transition-colors";
 
 interface FormFieldProps {
   label: string;
@@ -30,9 +30,6 @@ interface FormFieldProps {
   className?: string;
 }
 
-/**
- * Global FormField — HeroUI TextField composition with consistent dark styling.
- */
 export default function FormField({
   label,
   name,
@@ -64,11 +61,11 @@ export default function FormField({
       isInvalid={!!errorMessage}
       className={className}
     >
-      <Label className="text-zinc-400 text-xs font-medium">{label}</Label>
+      <Label className="text-text-secondary text-xs font-medium">{label}</Label>
       {hasAdornment ? (
         <InputGroup className={inputVisualClass}>
           {startContent != null ? (
-            <InputGroup.Prefix className="text-zinc-400">{startContent}</InputGroup.Prefix>
+            <InputGroup.Prefix className="text-text-muted">{startContent}</InputGroup.Prefix>
           ) : null}
           <InputGroup.Input
             type={type}
@@ -76,7 +73,7 @@ export default function FormField({
             className="min-w-0 flex-1 border-0 bg-transparent shadow-none outline-none"
           />
           {endContent != null ? (
-            <InputGroup.Suffix className="text-zinc-400">{endContent}</InputGroup.Suffix>
+            <InputGroup.Suffix className="text-text-muted">{endContent}</InputGroup.Suffix>
           ) : null}
         </InputGroup>
       ) : (
@@ -87,10 +84,10 @@ export default function FormField({
         />
       )}
       {description ? (
-        <Description className="text-zinc-500 text-xs">{description}</Description>
+        <Description className="text-text-muted text-xs">{description}</Description>
       ) : null}
       {errorMessage ? (
-        <FieldError className="text-red-400 text-xs">{errorMessage}</FieldError>
+        <FieldError className="text-error text-xs">{errorMessage}</FieldError>
       ) : null}
     </TextField>
   );

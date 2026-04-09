@@ -1,9 +1,62 @@
 @import "tailwindcss";
 
-@custom-variant dark (&:is(.dark *));
+/* ── HUD Design Tokens ─────────────────────────────────────── */
 
-/* Critical Cesium canvas sizing (inlined so Tailwind/PostCSS cannot drop it).
-   Full widgets.css is linked from layout.tsx. */
+:root {
+  --bg-base: #05080F;
+  --bg-surface: #0B121C;
+  --bg-elevated: #131C2A;
+
+  --color-primary: #00E5FF;
+  --color-primary-hover: #33EAFF;
+  --color-accent: #F5D259;
+  --color-accent-hover: #F7DC78;
+
+  --color-error: #FF4D4D;
+  --color-warning: #FFB020;
+  --color-success: #00E676;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: #8B9BB4;
+  --text-muted: #4A5B76;
+
+  --border-subtle: #1E293B;
+  --border-active: #00E5FF;
+
+  --glow-primary: 0 0 10px rgba(0, 229, 255, 0.2);
+  --glow-accent: 0 0 10px rgba(245, 210, 89, 0.2);
+}
+
+@theme inline {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+
+  --color-error: var(--color-error);
+  --color-warning: var(--color-warning);
+  --color-success: var(--color-success);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --color-border-subtle: var(--border-subtle);
+  --color-border-active: var(--border-active);
+
+  --color-background: var(--bg-base);
+  --color-foreground: var(--text-primary);
+
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+/* ── Cesium canvas sizing (critical — do not remove) ──────── */
+
 .cesium-widget {
   overflow: hidden;
   display: block;
@@ -20,22 +73,7 @@
   touch-action: none;
 }
 
-:root {
-  --background: #ffffff;
-  --foreground: #09090b;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-.dark {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-}
+/* ── Base ──────────────────────────────────────────────────── */
 
 html,
 body {
@@ -44,7 +82,6 @@ body {
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
 }

@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { Manifest } from '../types/manifest';
+import { apiClient } from '../lib/http';
 
-export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons' | 'site_model';
+export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons' | 'site_model' | 'heatmap' | 'contours';
 export type TerrainMode = 'dtm' | 'dsm';
 export type ToolMode = 'select' | 'distance' | 'area' | 'volume';
 export type BlendPreset = 'stacked' | 'embedded';
@@ -13,11 +14,12 @@ export interface MeasurementPoint {
 }
 
 export interface MeasurementState {
-  tool: 'distance' | 'area' | null;
+  tool: 'distance' | 'area' | 'volume' | null;
   status: 'idle' | 'drawing' | 'complete';
   points: MeasurementPoint[];
   distanceMeters?: number;
   areaSquareMeters?: number;
+  volumeCubicMeters?: number;
 }
 
 export interface SelectedAreaDetails {
@@ -99,15 +101,27 @@ export interface ViewerState {
   // Camera state (Cesium coordinate system)
   cameraState: CesiumCameraState;
   setCameraState: (state: CesiumCameraState) => void;
+
+  // Cursor position (updated on mouse move over globe)
+  cursorPosition: { lng: number; lat: number; elevation: number | null } | null;
+  setCursorPosition: (pos: { lng: number; lat: number; elevation: number | null } | null) => void;
+
+  // Survey timeline switching
+  availableSurveys: { id: string; date: string; label: string }[];
+  activeSurveyId: string | null;
+  setAvailableSurveys: (surveys: { id: string; date: string; label: string }[]) => void;
+  switchSurvey: (id: string) => void;
 }
 
 const initialLayers: Record<LayerId, LayerState> = {
   ortho: { id: 'ortho', name: 'Orthomosaic', visible: true, opacity: 1, loading: false, error: null },
-  // "Terrain" toggles a future draped terrain overlay in the UI; globe terrain comes from DTM/DSM toolbar.
-  dsm: { id: 'dsm', name: 'Terrain', visible: false, opacity: 0.8, loading: false, error: null },
+  // Terrain layer toggle controls whether DSM/DTM terrain mesh is active on the globe.
+  dsm: { id: 'dsm', name: 'Terrain', visible: true, opacity: 0.8, loading: false, error: null },
   laz: { id: 'laz', name: 'Point Cloud', visible: true, opacity: 1, loading: false, error: null },
-  polygons: { id: 'polygons', name: 'Regions of Interest', visible: true, opacity: 0.5, loading: false, error: null },
+  polygons: { id: 'polygons', name: 'Regions of Interest', visible: true, opacity: 0.35, loading: false, error: null },
   site_model: { id: 'site_model', name: 'Site Model (3D)', visible: true, opacity: 1, loading: false, error: null },
+  heatmap: { id: 'heatmap', name: 'Cut/Fill Heatmap', visible: false, opacity: 0.7, loading: false, error: null },
+  contours: { id: 'contours', name: 'Contour Lines', visible: false, opacity: 1, loading: false, error: null },
 };
 
 // Mine site centre: lon=152.414949, lat=-32.062341
@@ -154,12 +168,28 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   loadManifest: async (id: string) => {
     try {
-      const baseUrl = id.includes('?') ? id.split('?')[0] : id;
-      const query = id.includes('?') ? '?' + id.split('?')[1] : '';
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8080';
-      const response = await fetch(`${apiBase}/api/manifests/${baseUrl}${query}`);
-      if (!response.ok) throw new Error('Failed to load manifest');
-      const manifest = (await response.json()) as Manifest;
+      const surveyId = id.includes('?') ? id.split('?')[0] : id;
+      let manifest: Manifest;
+
+      // Try v1 dynamic manifest first (BuildManifest from DB).
+      // Falls back to legacy static manifest endpoint for non-UUID IDs
+      // (e.g. "rendering-assets-v2") or if the v1 endpoint returns 404.
+      try {
+        const resp = await apiClient.get<Manifest>(`/api/v1/surveys/${surveyId}/manifest`);
+        manifest = resp.data;
+        // If the DB-built manifest came back empty (survey exists in surveys
+        // table but has no processed assets yet), fall through to the legacy
+        // static manifest which may have hand-authored data.
+        if (!manifest.assets || manifest.assets.length === 0) {
+          throw new Error('v1 manifest has no assets — trying legacy fallback');
+        }
+      } catch {
+        // Fallback: legacy static manifest (e.g. for dev/demo without DB).
+        // Use apiClient (not bare fetch) so the auth token is included.
+        const fallback = await apiClient.get<Manifest>(`/api/manifests/${surveyId}`);
+        manifest = fallback.data;
+      }
+
       const nextState: Partial<ViewerState> = { manifest };
       const cameraFromManifest = cameraFromBounds(manifest);
       if (cameraFromManifest) {
@@ -198,7 +228,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   terrainExaggeration: 1,
   setTerrainExaggeration: (exaggeration) => set({ terrainExaggeration: exaggeration }),
 
-  blendPreset: 'embedded',
+  blendPreset: 'stacked',
   setBlendPreset: (blendPreset) => set({ blendPreset }),
 
   setLayerVisibility: (id, visible) =>
@@ -229,4 +259,16 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   cameraState: initialCameraState,
   setCameraState: (cameraState) => set({ cameraState }),
+
+  cursorPosition: null,
+  setCursorPosition: (cursorPosition) => set({ cursorPosition }),
+
+  availableSurveys: [],
+  activeSurveyId: null,
+  setAvailableSurveys: (availableSurveys) => set({ availableSurveys }),
+  switchSurvey: (id) => {
+    const { loadManifest } = get();
+    set({ activeSurveyId: id });
+    loadManifest(id);
+  },
 }));

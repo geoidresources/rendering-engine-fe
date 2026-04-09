@@ -1,6 +1,6 @@
 import React from 'react';
 import { useViewerStore } from '../store/viewerStore';
-import { Info, Loader2, Ruler, Square, MapPinned } from 'lucide-react';
+import { Info, Loader2, Ruler, Square, MapPinned, Trash2 } from 'lucide-react';
 
 function formatDistance(distanceMeters?: number): string {
   if (!distanceMeters || distanceMeters <= 0) return '0 m';
@@ -16,6 +16,11 @@ function formatArea(areaSquareMeters?: number): string {
     : `${areaSquareMeters.toFixed(0)} m\u00B2`;
 }
 
+function formatVolume(volumeCubicMeters?: number): string {
+  if (!volumeCubicMeters || volumeCubicMeters <= 0) return '0 m\u00B3';
+  return `${volumeCubicMeters.toLocaleString(undefined, { maximumFractionDigits: 0 })} m\u00B3`;
+}
+
 export const InspectorPanel: React.FC = () => {
   const {
     selectedFeature,
@@ -25,11 +30,18 @@ export const InspectorPanel: React.FC = () => {
     areaDetailsLoading,
     activeTool,
     measurement,
+    clearMeasurement,
+    setActiveTool,
   } = useViewerStore();
 
   const clearSelection = () => {
     setSelectedFeature(null);
     setSelectedAreaDetails(null);
+  };
+
+  const handleClearMeasurement = () => {
+    clearMeasurement();
+    setActiveTool('select');
   };
 
   return (
@@ -73,18 +85,23 @@ export const InspectorPanel: React.FC = () => {
 
             {activeTool === 'distance' && (
               <>
-                <p>Click once to place the start point, then click again to finish the measurement.</p>
+                <p>Click to place points. Double-click or right-click to finish.</p>
                 <p className="mt-2 text-blue-950 dark:text-blue-100">
-                  Current length: <strong>{formatDistance(measurement.distanceMeters)}</strong>
+                  Distance: <strong>{formatDistance(measurement.distanceMeters)}</strong>
                 </p>
+                {measurement.points.length > 0 && (
+                  <p className="mt-1 text-blue-950 dark:text-blue-100">
+                    Points: <strong>{measurement.points.length}</strong>
+                  </p>
+                )}
               </>
             )}
 
             {activeTool === 'area' && (
               <>
-                <p>Click to add polygon vertices. Right click to finish the area measurement.</p>
+                <p>Click to add polygon vertices. Right-click to close and measure.</p>
                 <p className="mt-2 text-blue-950 dark:text-blue-100">
-                  Current area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
+                  Area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
                 </p>
                 <p className="mt-1 text-blue-950 dark:text-blue-100">
                   Vertices: <strong>{measurement.points.length}</strong>
@@ -93,7 +110,34 @@ export const InspectorPanel: React.FC = () => {
             )}
 
             {activeTool === 'volume' && (
-              <p>Volume is not wired yet. Distance and area are live now, and this panel is ready for the future volume breakdown.</p>
+              <>
+                <p>Draw a polygon around a stockpile. Right-click to close and compute volume.</p>
+                <p className="mt-2 text-blue-950 dark:text-blue-100">
+                  Area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
+                </p>
+                {measurement.volumeCubicMeters !== undefined && (
+                  <p className="mt-1 text-blue-950 dark:text-blue-100">
+                    Volume: <strong>{formatVolume(measurement.volumeCubicMeters)}</strong>
+                  </p>
+                )}
+                {measurement.status === 'drawing' && measurement.points.length >= 3 && measurement.volumeCubicMeters === undefined && (
+                  <p className="mt-1 text-blue-700 dark:text-blue-300 italic">Computing volume...</p>
+                )}
+                <p className="mt-1 text-blue-950 dark:text-blue-100">
+                  Vertices: <strong>{measurement.points.length}</strong>
+                </p>
+              </>
+            )}
+
+            {measurement.status !== 'idle' && (
+              <button
+                type="button"
+                onClick={handleClearMeasurement}
+                className="mt-2 flex items-center gap-1.5 text-[11px] text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100 transition-colors"
+              >
+                <Trash2 className="h-3 w-3" />
+                Clear measurement
+              </button>
             )}
           </div>
         )}
