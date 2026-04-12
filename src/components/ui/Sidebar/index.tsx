@@ -73,7 +73,7 @@ export default function Sidebar() {
               className={`
                 flex items-center gap-3 px-3 py-2.5 text-xs font-medium uppercase tracking-wider transition-colors
                 ${isActive
-                  ? "border-l-2 border-primary text-primary bg-primary/5"
+                  ? "border-l-2 border-text-primary text-text-primary bg-bg-elevated"
                   : "border-l-2 border-transparent text-text-secondary hover:text-text-primary hover:bg-bg-elevated"
                 }
               `}

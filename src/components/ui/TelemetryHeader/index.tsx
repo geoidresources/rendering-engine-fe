@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Search, Bell, Wifi, UserCircle } from "lucide-react";
+import { Search, Bell, Settings, UserCircle } from "lucide-react";
 
 export default function TelemetryHeader() {
   const pathname = usePathname();
@@ -39,7 +39,7 @@ export default function TelemetryHeader() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
           <input
             type="text"
-            placeholder="SEARCH TELEMETRY..."
+            placeholder="Search..."
             className="bg-bg-elevated border border-border-subtle rounded-sm pl-9 pr-4 py-1.5 text-[10px] uppercase tracking-wider font-mono text-text-primary placeholder:text-text-muted w-52 outline-none focus:border-border-active transition-colors"
           />
         </div>
@@ -49,7 +49,7 @@ export default function TelemetryHeader() {
           <Bell size={18} />
         </button>
         <button className="text-text-muted hover:text-text-secondary transition-colors bg-transparent border-none cursor-pointer">
-          <Wifi size={18} />
+          <Settings size={18} />
         </button>
         <button className="text-text-muted hover:text-text-secondary transition-colors bg-transparent border-none cursor-pointer">
           <UserCircle size={22} />

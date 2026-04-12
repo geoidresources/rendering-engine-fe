@@ -12,12 +12,20 @@ export interface Manifest {
   capturedAt?: string;
   rendering?: RenderingDefaults;
   anchors?: Anchor[];
+  /** Per-processor status for non-completed assets (pending, running, failed, timed_out). */
+  assetStatuses?: AssetStatus[];
+}
+
+export interface AssetStatus {
+  processorType: string;
+  status: 'pending' | 'running' | 'failed' | 'timed_out' | 'cancelled';
+  error?: string;
 }
 
 export interface Asset {
   id: string;
   assetType: 'ortho' | 'terrain_dsm' | 'terrain_dtm' | 'point_cloud' | 'vector' | 'site_model' | 'heatmap' | 'contours';
-  format: 'xyz' | 'terrain-rgb' | 'quantized-mesh' | 'laz' | '3dtiles' | 'geojson' | 'glb';
+  format: 'xyz' | 'terrain-rgb' | 'quantized-mesh' | 'laz' | '3dtiles' | 'copc' | 'geojson' | 'glb';
   url: string;
   crs?: string;
   bbox?: number[];

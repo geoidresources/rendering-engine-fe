@@ -309,7 +309,15 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   const pointCloudTilesetUrl = useMemo(() => {
     if (!manifest?.assets) return undefined;
     for (const a of manifest.assets) {
-      if (a.assetType === 'point_cloud' && (a.format === '3dtiles' || /tileset\.json/.test(a.url))) return a.url;
+      if (a.assetType !== 'point_cloud') continue;
+      // Accept traditional 3D Tiles (tileset.json) and COPC (.copc.laz).
+      // Cesium 1.139 cannot load .copc.laz directly via Cesium3DTileset.fromUrl,
+      // so the COPC case will surface a visible error to the user rather than
+      // being silently dropped. Proper COPC rendering is a follow-up (either a
+      // py3dtiles conversion step in the processor or a dedicated COPC loader).
+      if (a.format === '3dtiles' || a.format === 'copc' || /tileset\.json/.test(a.url) || /\.copc\.laz$/i.test(a.url)) {
+        return a.url;
+      }
     }
     return undefined;
   }, [manifest]);
@@ -667,9 +675,25 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         setLayerError('laz', 'No 3D Tiles URL found in manifest.');
       }
       return;
-    } else {
-      setLayerError('laz', null);
     }
+
+    // COPC (.copc.laz) is produced by the processor today but Cesium 1.139 has
+    // no native loader. Surface a clear status message instead of letting
+    // Cesium3DTileset.fromUrl throw an opaque stack trace. This is tracked as
+    // a follow-up (convert COPC → 3D Tiles in workflow-geo-svc).
+    if (/\.copc\.laz$/i.test(pointCloudTilesetUrl)) {
+      if (tilesetRef.current) {
+        tilesetRef.current.show = false;
+        viewer.scene.requestRender();
+      }
+      setLayerError(
+        'laz',
+        'Point cloud is COPC format — viewer needs a 3D Tiles conversion step. Tracked as Phase A-4 in the backlog.',
+      );
+      return;
+    }
+
+    setLayerError('laz', null);
 
     let isSubscribed = true;
 
