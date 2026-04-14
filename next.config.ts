@@ -11,6 +11,16 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   reactCompiler: false,
   // Do NOT use transpilePackages for cesium or resium (pnpm + CJS/ESM issues).
+  async rewrites() {
+    return [
+      // Proxy API requests to the backend services so the browser never
+      // needs cross-origin calls and CORS headers become irrelevant.
+      {
+        source: "/api/v1/:path*",
+        destination: `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080"}/api/v1/:path*`,
+      },
+    ];
+  },
   async redirects() {
     return [
       { source: "/", destination: "/login", permanent: false },

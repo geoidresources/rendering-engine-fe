@@ -18,6 +18,25 @@ export interface DashboardAlert {
   survey_date: string;
 }
 
+export interface PipelineActivityPoint {
+  label: string; // "Jan", "Feb", …
+  value: number;
+}
+
+export interface PipelineRow {
+  project: string;
+  epoch: string;
+  stage: string;
+  duration: string;
+  status: string;
+}
+
+export interface PipelineCounts {
+  complete: number;
+  processing: number;
+  failed: number;
+}
+
 export interface DashboardSummary {
   active_projects: number;
   total_surveys: number;
@@ -27,6 +46,10 @@ export interface DashboardSummary {
   alert_count: number;
   recent_projects: DashboardRecentProject[];
   recent_alerts: DashboardAlert[];
+  pipeline_activity: PipelineActivityPoint[];
+  pipeline_rows: PipelineRow[];
+  pipeline_counts: PipelineCounts;
+  pipeline_health_pct: number;
 }
 
 // --- Projects ---

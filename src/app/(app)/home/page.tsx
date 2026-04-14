@@ -12,13 +12,6 @@ import AppButton from "@/components/ui/AppButton";
 import MiniBarChart from "@/components/ui/MiniBarChart";
 import CircularProgress from "@/components/ui/CircularProgress";
 import { useDashboardSummary } from "@/hooks/useDashboard";
-import {
-  MOCK_PIPELINE_ACTIVITY,
-  MOCK_PIPELINE_ROWS,
-  MOCK_PIPELINE_HEALTH,
-  MOCK_DELTAS,
-  MOCK_PIPELINE_COUNTS,
-} from "./_mockData";
 
 /* ── Helpers ────────────────────────────────────────────── */
 
@@ -51,6 +44,7 @@ const pipelineColumns = [
     mono: true as const,
     sortable: true,
     render: (val: unknown) => {
+      if (!val || val === "") return <span className="text-text-muted">—</span>;
       const d = new Date(val as string);
       return d.toLocaleDateString("en-AU", { day: "2-digit", month: "short", year: "numeric" });
     },
@@ -81,12 +75,10 @@ export default function HomePage() {
     {
       title: "Active Projects",
       value: data ? String(data.active_projects).padStart(2, "0") : "--",
-      delta: MOCK_DELTAS.activeProjects,
     },
     {
       title: "Surveys This Month",
       value: data ? String(data.total_surveys).padStart(2, "0") : "--",
-      delta: MOCK_DELTAS.surveysThisMonth,
     },
     {
       title: "Processing Queue",
@@ -95,9 +87,16 @@ export default function HomePage() {
     {
       title: "Open Alerts",
       value: data ? String(data.alert_count).padStart(2, "0") : "--",
-      delta: MOCK_DELTAS.openAlerts,
     },
   ];
+
+  const pipelineActivity = data?.pipeline_activity ?? [];
+  const pipelineRows = (data?.pipeline_rows ?? []) as unknown as Record<string, unknown>[];
+  const pipelineHealth = data?.pipeline_health_pct ?? 0;
+  const pipelineCounts = data?.pipeline_counts ?? { complete: 0, processing: 0, failed: 0 };
+
+  // Align bar chart active index to current month within the 12-slot window.
+  const activeBarIndex = pipelineActivity.length > 0 ? pipelineActivity.length - 1 : currentMonthIndex;
 
   return (
     <div className="p-6 flex flex-col gap-6">
@@ -154,10 +153,14 @@ export default function HomePage() {
               <div className="h-[220px] flex items-center justify-center text-text-muted text-xs">
                 Loading chart...
               </div>
+            ) : pipelineActivity.length === 0 ? (
+              <div className="h-[220px] flex items-center justify-center text-text-muted text-xs">
+                No pipeline data yet
+              </div>
             ) : (
               <MiniBarChart
-                data={MOCK_PIPELINE_ACTIVITY}
-                activeIndex={currentMonthIndex}
+                data={pipelineActivity}
+                activeIndex={activeBarIndex}
                 height={220}
               />
             )}
@@ -213,28 +216,34 @@ export default function HomePage() {
 
           {/* Pipeline Health */}
           <Panel title="Pipeline Health">
-            <div className="flex flex-col items-center gap-4 py-2">
-              <CircularProgress
-                value={MOCK_PIPELINE_HEALTH}
-                variant="primary"
-                size={80}
-                strokeWidth={6}
-              />
-              <div className="w-full flex flex-col gap-2">
-                <div className="flex justify-between">
-                  <span className="text-text-muted text-[10px] uppercase tracking-wider">Completed</span>
-                  <span className="text-success text-xs font-mono">{MOCK_PIPELINE_COUNTS.complete}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted text-[10px] uppercase tracking-wider">Processing</span>
-                  <span className="text-primary text-xs font-mono">{MOCK_PIPELINE_COUNTS.processing}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-text-muted text-[10px] uppercase tracking-wider">Failed</span>
-                  <span className="text-error text-xs font-mono">{MOCK_PIPELINE_COUNTS.failed}</span>
+            {isLoading ? (
+              <div className="h-[120px] flex items-center justify-center text-text-muted text-xs">
+                Loading...
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4 py-2">
+                <CircularProgress
+                  value={pipelineHealth}
+                  variant="primary"
+                  size={80}
+                  strokeWidth={6}
+                />
+                <div className="w-full flex flex-col gap-2">
+                  <div className="flex justify-between">
+                    <span className="text-text-muted text-[10px] uppercase tracking-wider">Completed</span>
+                    <span className="text-success text-xs font-mono">{pipelineCounts.complete}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-muted text-[10px] uppercase tracking-wider">Processing</span>
+                    <span className="text-primary text-xs font-mono">{pipelineCounts.processing}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-muted text-[10px] uppercase tracking-wider">Failed</span>
+                    <span className="text-error text-xs font-mono">{pipelineCounts.failed}</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            )}
           </Panel>
         </div>
       </div>
@@ -251,11 +260,15 @@ export default function HomePage() {
           </Link>
         }
       >
-        <DataTable
-          columns={pipelineColumns}
-          data={MOCK_PIPELINE_ROWS}
-          emptyMessage="No surveys in pipeline."
-        />
+        {isLoading ? (
+          <div className="p-6 text-text-muted text-xs text-center">Loading pipeline...</div>
+        ) : (
+          <DataTable
+            columns={pipelineColumns}
+            data={pipelineRows}
+            emptyMessage="No surveys in pipeline."
+          />
+        )}
       </Panel>
     </div>
   );

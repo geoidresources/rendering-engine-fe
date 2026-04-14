@@ -374,6 +374,46 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
           }));
 
         setAvailableSurveys(surveys);
+
+        // Fetch temporal anomaly alerts for this project
+        try {
+          type TrendRow = { material: string; is_anomaly: boolean; anomaly_severity: string; anomaly_z_score: number };
+          const trendsResp = await apiClient.get<TrendRow[]>(`/api/v1/analytics/trends?project_id=${projectId}&material=`);
+          if (!cancelled && trendsResp.data?.length) {
+            const anomalies: AnomalyAlert[] = trendsResp.data
+              .filter((t) => t.is_anomaly)
+              .slice(0, 3)
+              .map((t, i) => ({
+                id: `anomaly-${i}`,
+                type: 'volume',
+                severity: t.anomaly_severity ?? 'warning',
+                message: `${t.material}: anomaly detected (z=${t.anomaly_z_score?.toFixed(2) ?? '—'})`,
+                zone: t.material,
+              }));
+            if (anomalies.length > 0) setLiveAnomalies(anomalies);
+          }
+        } catch { /* non-critical */ }
+
+        // Fetch stockpile totals for site distribution chart
+        try {
+          type StockpileRow = { material_type: string; volume_m3: number };
+          const stockpilesResp = await apiClient.get<StockpileRow[]>(`/api/v1/analytics/stockpiles?survey_id=${sid}`);
+          if (!cancelled && stockpilesResp.data?.length) {
+            // Group by material and sum volume
+            const grouped = stockpilesResp.data.reduce<Record<string, number>>((acc, row) => {
+              const key = row.material_type || 'Unknown';
+              acc[key] = (acc[key] ?? 0) + (row.volume_m3 ?? 0);
+              return acc;
+            }, {});
+            const COLORS = ['#eab308', '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f97316'];
+            const distrib: SiteDistributionItem[] = Object.entries(grouped)
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 6)
+              .map(([label, value], i) => ({ label, value: Math.round(value), color: COLORS[i % COLORS.length] }));
+            if (distrib.length > 0) setLiveSiteDistrib(distrib);
+          }
+        } catch { /* non-critical */ }
+
       } catch {
         // Survey list is non-critical — silently ignore (timeline just stays hidden)
       }
@@ -519,6 +559,8 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
   // ---- 3D/2D mode state ----
   const [is3D, setIs3D] = useState(true);
+  const [liveAnomalies, setLiveAnomalies] = useState<AnomalyAlert[] | null>(null);
+  const [liveSiteDistrib, setLiveSiteDistrib] = useState<SiteDistributionItem[] | null>(null);
 
   // ---- Global loading overlay ----
   const isManifestLoading = !manifest;
@@ -1154,8 +1196,8 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         {/* Right sidebar panels — anomaly alerts, zone analytics, site distribution */}
         <div className="absolute top-[340px] right-4 z-10 flex flex-col gap-3 max-h-[calc(100dvh-400px)] overflow-y-auto scrollbar-thin">
           <ZoneAnalyticsPanel zone={zoneData} />
-          <AnomalyAlerts alerts={DEMO_ANOMALY_ALERTS} />
-          <SiteDistribution data={DEMO_SITE_DISTRIBUTION} />
+          <AnomalyAlerts alerts={liveAnomalies ?? DEMO_ANOMALY_ALERTS} />
+          <SiteDistribution data={liveSiteDistrib ?? DEMO_SITE_DISTRIBUTION} />
         </div>
 
         {/* Heatmap legend — bottom left */}
