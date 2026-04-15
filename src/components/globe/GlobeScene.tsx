@@ -705,27 +705,7 @@ export default function GlobeScene({
         );
       };
 
-      const animate = () => {
-        if (dead) return;
-        rafRef.current = requestAnimationFrame(animate);
-        t += 0.016;
-
-        applyFlyTween();
-
-        // pulse rings expand + fade
-        for (const ring of pulseRings) {
-          const phase = (ring as any).__phase as number;
-          const cycle = ((t * 1.2 + phase) % (Math.PI * 2)) / (Math.PI * 2);
-          const s = 1 + cycle * 3.5;
-          ring.scale.set(s, s, s);
-          (ring.material as THREE.MeshBasicMaterial).opacity = (1 - cycle) * 0.45;
-        }
-
-        renderer.render(scene, camera);
-        // Update after render so globe.matrixWorld is fresh for this frame.
-        updateMarkerScreenPos();
-      };
-      animate();
+      // (unified loop defined below after drag setup)
 
       /* ── Resize ── */
       const onResize = () => {
@@ -738,14 +718,58 @@ export default function GlobeScene({
       };
       window.addEventListener("resize", onResize);
 
-      /* ── Mouse interaction: subtle parallax ── */
+      /* ── Mouse interaction: drag-to-rotate + subtle parallax ── */
       let mouseX = 0;
       let mouseY = 0;
-      const onMouse = (e: MouseEvent) => {
+      let isDragging = false;
+      let dragLastX = 0;
+      let dragLastY = 0;
+      // Inertia velocity (radians/frame)
+      let velX = 0;
+      let velY = 0;
+
+      const onMouseDown = (e: MouseEvent) => {
+        isDragging = true;
+        dragLastX = e.clientX;
+        dragLastY = e.clientY;
+        velX = 0;
+        velY = 0;
+      };
+
+      const onMouseMove = (e: MouseEvent) => {
+        // Parallax target (normalised -1 → 1)
         mouseX = (e.clientX / window.innerWidth) * 2 - 1;
         mouseY = (e.clientY / window.innerHeight) * 2 - 1;
+
+        if (!isDragging) return;
+        const dx = e.clientX - dragLastX;
+        const dy = e.clientY - dragLastY;
+        dragLastX = e.clientX;
+        dragLastY = e.clientY;
+
+        // Sensitivity: pixels → radians
+        const sensitivity = 0.002;
+        velX = dy * sensitivity;   // pitch (up/down drag → X-axis rotation)
+        velY = dx * sensitivity;   // yaw  (left/right drag → Y-axis rotation)
+
+        // Apply rotation immediately while dragging
+        globe.rotation.x += velX;
+        globe.rotation.y += velY;
+        // Stop auto-rotation while dragging
+        rotationStopped = true;
       };
-      window.addEventListener("mousemove", onMouse);
+
+      const onMouseUp = () => {
+        isDragging = false;
+        // velX / velY carry the last delta for inertia
+      };
+
+      el.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+
+      // cancel basic loop and start unified loop
+      cancelAnimationFrame(rafRef.current);
 
       // apply parallax in animation
       const animateWithParallax = () => {
@@ -755,10 +779,25 @@ export default function GlobeScene({
 
         applyFlyTween();
 
-        // subtle camera parallax
-        camera.position.x += (mouseX * 0.15 - camera.position.x) * 0.02;
-        camera.position.y += (0.2 + mouseY * -0.1 - camera.position.y) * 0.02;
-        camera.lookAt(0, 0, 0);
+        // Inertia: apply velocity and dampen each frame
+        if (!isDragging && !flyActive) {
+          if (Math.abs(velX) > 0.0001 || Math.abs(velY) > 0.0001) {
+            globe.rotation.x += velX;
+            globe.rotation.y += velY;
+            velX *= 0.92;  // friction / damping
+            velY *= 0.92;
+          } else if (!rotationStopped) {
+            // Auto-rotation resumes when inertia dies out
+            globe.rotation.y += ROTATION_SPEED;
+          }
+        }
+
+        // Subtle camera parallax (only when not dragging)
+        if (!isDragging) {
+          camera.position.x += (mouseX * 0.12 - camera.position.x) * 0.05;
+          camera.position.y += (0.2 + mouseY * -0.08 - camera.position.y) * 0.05;
+          camera.lookAt(0, 0, 0);
+        }
 
         for (const ring of pulseRings) {
           const phase = (ring as any).__phase as number;
@@ -769,11 +808,8 @@ export default function GlobeScene({
         }
 
         renderer.render(scene, camera);
-        // Same per-frame tracking — captures parallax camera shift too.
         updateMarkerScreenPos();
       };
-      // cancel basic loop and start parallax loop
-      cancelAnimationFrame(rafRef.current);
       animateWithParallax();
 
       /* ── Cleanup ── */
@@ -783,7 +819,9 @@ export default function GlobeScene({
         markerUpdateCallbackRef.current = null;
         isTrackingRef.current = false;
         window.removeEventListener("resize", onResize);
-        window.removeEventListener("mousemove", onMouse);
+        el.removeEventListener("mousedown", onMouseDown);
+        window.removeEventListener("mousemove", onMouseMove);
+        window.removeEventListener("mouseup", onMouseUp);
         cancelAnimationFrame(rafRef.current);
         scene.traverse((o) => {
           const m = o as THREE.Mesh;
@@ -806,7 +844,7 @@ export default function GlobeScene({
   return (
     <div className={`relative w-full h-full overflow-hidden bg-[#020208] ${className ?? ""}`}>
       {/* Three.js canvas mount */}
-      <div ref={mountRef} className="absolute inset-0" />
+      <div ref={mountRef} className="absolute inset-0" style={{ cursor: "grab" }} onMouseDown={(e) => (e.currentTarget.style.cursor = "grabbing")} onMouseUp={(e) => (e.currentTarget.style.cursor = "grab")} />
 
       {/* ── HUD overlay ── */}
       <div className="absolute inset-0 pointer-events-none select-none">

@@ -91,17 +91,17 @@ export default function MeasurementsPage() {
 
   const stats = inventory
     ? [
-        { title: "Total Inventory", value: formatNum(inventory.total_volume_m3), subtitle: `${formatNum(inventory.total_tonnage)} tonnes` },
-        { title: "Measured Area", value: `${formatNum(inventory.total_area_m2)} M²`, subtitle: "Total coverage" },
-        { title: "Stockpiles", value: String(inventory.stockpile_count), subtitle: "With volume data" },
-        { title: "Total Features", value: String(inventory.items.length), subtitle: "All measurement types" },
-      ]
+      { title: "Total Inventory", value: formatNum(inventory.total_volume_m3), subtitle: `${formatNum(inventory.total_tonnage)} tonnes` },
+      { title: "Measured Area", value: `${formatNum(inventory.total_area_m2)} M²`, subtitle: "Total coverage" },
+      { title: "Stockpiles", value: String(inventory.stockpile_count), subtitle: "With volume data" },
+      { title: "Total Features", value: String(inventory.items.length), subtitle: "All measurement types" },
+    ]
     : [
-        { title: "Total Inventory", value: "--" },
-        { title: "Measured Area", value: "--" },
-        { title: "Stockpiles", value: "--" },
-        { title: "Total Features", value: "--" },
-      ];
+      { title: "Total Inventory", value: "--" },
+      { title: "Measured Area", value: "--" },
+      { title: "Stockpiles", value: "--" },
+      { title: "Total Features", value: "--" },
+    ];
 
   return (
     <div className="p-6 flex flex-col gap-6">
@@ -194,8 +194,8 @@ export default function MeasurementsPage() {
                 <span className="text-text-muted text-[10px] uppercase tracking-wider">Mean height</span>
                 <span className="text-text-secondary text-xs font-mono">
                   {selectedItem?.volume_m3 != null &&
-                  selectedItem?.area_m2 != null &&
-                  selectedItem.area_m2 > 0
+                    selectedItem?.area_m2 != null &&
+                    selectedItem.area_m2 > 0
                     ? `${formatNum(selectedItem.volume_m3 / selectedItem.area_m2)} m`
                     : "—"}
                 </span>
@@ -215,7 +215,7 @@ export default function MeasurementsPage() {
             </div>
           </Panel>
 
-          <Panel>
+          {/* <Panel>
             <div className="flex flex-col gap-2">
               <AppButton variant="primary" size="sm" fullWidth>
                 Re-process Point Cloud
@@ -224,7 +224,7 @@ export default function MeasurementsPage() {
                 Download Mesh (.obj)
               </AppButton>
             </div>
-          </Panel>
+          </Panel> */}
 
           <Panel title="Quality Metrics">
             <div className="flex flex-col gap-2">
