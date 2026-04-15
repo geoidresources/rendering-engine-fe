@@ -2,6 +2,15 @@
 
 import React, { useState } from "react";
 import { ChevronUp, ChevronDown } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 
 interface Column<T> {
   key: string;
@@ -53,16 +62,18 @@ export default function DataTable<T extends Record<string, unknown>>({
     align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
 
   return (
-    <div className={`overflow-x-auto ${className}`}>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr className="bg-bg-elevated">
+    <div className={cn("overflow-x-auto", className)}>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-secondary border-b border-border-subtle hover:bg-secondary">
             {columns.map((col) => (
-              <th
+              <TableHead
                 key={col.key}
-                className={`px-4 py-2.5 text-[10px] uppercase tracking-wider font-medium text-text-muted ${alignClass(col.align)} ${
-                  col.sortable ? "cursor-pointer select-none hover:text-text-secondary" : ""
-                }`}
+                className={cn(
+                  "px-4 py-2.5 text-[10px] uppercase tracking-wider font-medium text-muted-foreground",
+                  alignClass(col.align),
+                  col.sortable && "cursor-pointer select-none hover:text-foreground/70",
+                )}
                 onClick={col.sortable ? () => handleSort(col.key) : undefined}
               >
                 <span className="inline-flex items-center gap-1">
@@ -71,46 +82,49 @@ export default function DataTable<T extends Record<string, unknown>>({
                     sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />
                   )}
                 </span>
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {sorted.length === 0 ? (
-            <tr>
-              <td
+            <TableRow className="hover:bg-transparent">
+              <TableCell
                 colSpan={columns.length}
-                className="px-4 py-8 text-center text-text-muted text-xs"
+                className="px-4 py-8 text-center text-muted-foreground text-xs"
               >
                 {emptyMessage}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ) : (
             sorted.map((row, i) => (
-              <tr
+              <TableRow
                 key={i}
-                className={`border-b border-border-subtle transition-colors ${
-                  onRowClick ? "cursor-pointer hover:bg-bg-elevated/50" : ""
-                }`}
+                className={cn(
+                  "border-b border-border-subtle transition-colors",
+                  onRowClick ? "cursor-pointer hover:bg-secondary/50" : "hover:bg-transparent",
+                )}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
               >
                 {columns.map((col) => (
-                  <td
+                  <TableCell
                     key={col.key}
-                    className={`px-4 py-3 text-xs text-text-secondary ${alignClass(col.align)} ${
-                      col.mono ? "font-mono" : ""
-                    }`}
+                    className={cn(
+                      "px-4 py-3 text-xs text-muted-foreground",
+                      alignClass(col.align),
+                      col.mono && "font-mono",
+                    )}
                   >
                     {col.render
                       ? col.render(row[col.key], row)
                       : (row[col.key] as React.ReactNode)}
-                  </td>
+                  </TableCell>
                 ))}
-              </tr>
+              </TableRow>
             ))
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }

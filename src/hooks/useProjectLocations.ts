@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
-import { apiClient } from "@/lib/http";
-import type { Project, Survey } from "@/types/api";
+import { apiClient, unwrapList } from "@/lib/http";
+import type { ListEnvelope, Project, Survey } from "@/types/api";
 import type { Manifest } from "@/types/manifest";
 
 export interface SiteLocation {
@@ -24,8 +24,12 @@ export function useProjectLocations() {
   return useQuery({
     queryKey: ["project-locations"],
     queryFn: async (): Promise<SiteLocation[]> => {
-      const projRes = await apiClient.get<Project[]>("/api/v1/projects");
-      const projects = projRes.data ?? [];
+      // `/projects` is a list endpoint wrapped in `{data, pagination}`;
+      // unwrap to a plain array before the per-project loop.
+      const projRes = await apiClient.get<ListEnvelope<Project>>(
+        "/api/v1/projects",
+      );
+      const projects = unwrapList<Project>(projRes.data);
 
       const locations: SiteLocation[] = [];
 
@@ -47,10 +51,10 @@ export function useProjectLocations() {
         // --- 2. Derive from survey manifest bbox ---
         if (proj.survey_count > 0) {
           try {
-            const survRes = await apiClient.get<Survey[]>(
+            const survRes = await apiClient.get<ListEnvelope<Survey>>(
               `/api/v1/surveys?project_id=${proj.id}`,
             );
-            const firstSurvey = survRes.data?.[0];
+            const firstSurvey = unwrapList<Survey>(survRes.data)[0];
             if (!firstSurvey) continue;
 
             const manRes = await apiClient.get<Manifest>(

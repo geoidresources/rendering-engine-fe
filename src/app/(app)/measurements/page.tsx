@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import DataTable from "@/components/ui/DataTable";
 import MetricStatBlock from "@/components/ui/MetricStatBlock";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -9,6 +11,13 @@ import { useMeasurementInventory } from "@/hooks/useMeasurements";
 import { useProjects } from "@/hooks/useProjects";
 import { useSurveys } from "@/hooks/useSurveys";
 import { toCSV, downloadCSV, type MeasurementRow } from "@/lib/export/csvExport";
+import type { MeasurementInventoryItem } from "@/types/api";
+
+// Lazy-load so Cesium JS stays out of the initial /measurements bundle.
+const StockpileMeshPreview = dynamic(
+  () => import("@/components/measurements/StockpileMeshPreview"),
+  { ssr: false },
+);
 
 function formatNum(n: number): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -21,6 +30,20 @@ export default function MeasurementsPage() {
   const surveyId = surveys?.[0]?.id ?? "";
 
   const { data: inventory, isLoading } = useMeasurementInventory(projectId, surveyId);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Auto-select the first pile with a real volume so the preview is
+  // never blank on load. Falls back to the very first row if nothing
+  // has volume data yet.
+  const selectedItem = useMemo<MeasurementInventoryItem | null>(() => {
+    const items = inventory?.items ?? [];
+    if (!items.length) return null;
+    if (selectedId) {
+      const hit = items.find((i) => i.id === selectedId);
+      if (hit) return hit;
+    }
+    return items.find((i) => i.volume_m3 != null) ?? items[0] ?? null;
+  }, [inventory, selectedId]);
 
   const columns = [
     { key: "name", label: "Name" },
@@ -126,9 +149,13 @@ export default function MeasurementsPage() {
             {isLoading ? (
               <div className="flex items-center justify-center py-20 text-text-muted text-xs">Loading inventory...</div>
             ) : (
-              <DataTable columns={columns} data={(inventory?.items ?? [])
-                .filter((item) => item.volume_m3 != null)
-                .sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0)) as unknown as Record<string, unknown>[]} />
+              <DataTable
+                columns={columns}
+                data={(inventory?.items ?? [])
+                  .filter((item) => item.volume_m3 != null)
+                  .sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0)) as unknown as Record<string, unknown>[]}
+                onRowClick={(row) => setSelectedId((row as unknown as MeasurementInventoryItem).id)}
+              />
             )}
           </Panel>
         </div>
@@ -142,44 +169,48 @@ export default function MeasurementsPage() {
                 Inspector
               </h3>
             </div>
-            {/* 3D Preview placeholder */}
+            {/* Live 3D extruded-polygon preview of the selected pile.
+                Height = volume / area (the volumetric mean); footprint
+                is the real polygon from measurements.geom. */}
             <div className="relative aspect-[4/3] bg-bg-elevated overflow-hidden">
-              <div
-                className="absolute inset-0"
-                style={{
-                  background: `
-                    radial-gradient(ellipse at 40% 50%, rgba(234,179,8,0.25) 0%, transparent 60%),
-                    radial-gradient(ellipse at 60% 40%, rgba(59,130,246,0.2) 0%, transparent 50%),
-                    linear-gradient(135deg, rgba(17,24,39,1) 0%, rgba(31,41,55,1) 100%)
-                  `,
-                }}
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-text-muted text-[10px] uppercase tracking-wider font-mono">
-                  3D Mesh Preview
-                </span>
-              </div>
+              {selectedItem ? (
+                <StockpileMeshPreview item={selectedItem} />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-text-muted text-[10px] uppercase tracking-wider font-mono">
+                    Select a stockpile
+                  </span>
+                </div>
+              )}
             </div>
             <div className="px-4 py-3 flex flex-col gap-2">
               <div className="flex justify-between">
-                <span className="text-text-muted text-[10px] uppercase tracking-wider">Vertices</span>
+                <span className="text-text-muted text-[10px] uppercase tracking-wider">Footprint</span>
                 <span className="text-text-secondary text-xs font-mono">
-                  {inventory ? formatNum(inventory.total_area_m2 * 12.5) : '—'}
+                  {selectedItem?.area_m2 != null ? `${formatNum(selectedItem.area_m2)} m²` : "—"}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-text-muted text-[10px] uppercase tracking-wider">Point Density</span>
-                <span className="text-text-secondary text-xs font-mono">48.2 pts/m²</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-text-muted text-[10px] uppercase tracking-wider">Bounding Box</span>
+                <span className="text-text-muted text-[10px] uppercase tracking-wider">Mean height</span>
                 <span className="text-text-secondary text-xs font-mono">
-                  {inventory ? `${formatNum(Math.sqrt(inventory.total_area_m2))} × ${formatNum(Math.sqrt(inventory.total_area_m2))} m` : '—'}
+                  {selectedItem?.volume_m3 != null &&
+                  selectedItem?.area_m2 != null &&
+                  selectedItem.area_m2 > 0
+                    ? `${formatNum(selectedItem.volume_m3 / selectedItem.area_m2)} m`
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-text-muted text-[10px] uppercase tracking-wider">Format</span>
-                <span className="text-text-secondary text-xs font-mono">LAZ 1.4</span>
+                <span className="text-text-muted text-[10px] uppercase tracking-wider">Volume</span>
+                <span className="text-text-secondary text-xs font-mono">
+                  {selectedItem?.volume_m3 != null ? `${formatNum(selectedItem.volume_m3)} m³` : "—"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted text-[10px] uppercase tracking-wider">Tonnage</span>
+                <span className="text-text-secondary text-xs font-mono">
+                  {selectedItem?.tonnage != null ? `${formatNum(selectedItem.tonnage)} t` : "—"}
+                </span>
               </div>
             </div>
           </Panel>

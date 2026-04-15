@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import * as THREE from "three";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
+import { useViewerStore } from "@/store/viewerStore";
+import { ProjectPlacard } from "@/app/project/sidebar/ProjectPlacard";
 
 /* ── Constants ─────────────────────────────────────────── */
 
@@ -173,6 +176,103 @@ export default function GlobeScene({
   const rafRef = useRef(0);
   const disposeRef = useRef<(() => void) | null>(null);
 
+  // Imperative handle: tween the globe's quaternion so a lat/lng faces camera.
+  const flyToLatLngRef = useRef<((lat: number, lng: number) => void) | null>(null);
+  const flyToTarget = useViewerStore((s) => s.flyToTarget);
+  const focusedProject = useViewerStore((s) => s.focusedProject);
+  const setFocusedProject = useViewerStore((s) => s.setFocusedProject);
+
+  // ── Per-frame marker tracking (fixes parallax drift) ────────────────────
+  // isTrackingRef: set true when a project is clicked, false when cleared.
+  const isTrackingRef = useRef(false);
+  // Called by the Three.js RAF loop every frame with current screen (x, y).
+  // Directly mutates SVG element attributes — no React re-renders needed.
+  const markerUpdateCallbackRef = useRef<((x: number, y: number) => void) | null>(null);
+
+  // SVG element refs
+  const svgGroupRef = useRef<SVGGElement>(null);   // outer group (controls visibility)
+  const svgLineRef = useRef<SVGLineElement>(null); // leader line
+  const dotGroupRef = useRef<SVGGElement>(null);   // pulsing dot
+  const gradientRef = useRef<SVGLinearGradientElement>(null); // gradient for line
+
+  // Card container ref (used to compute line endpoint from card's bounding rect)
+  const cardContainerRef = useRef<HTMLDivElement>(null);
+  // Cached card anchor (bottom-left corner of card in canvas coords).
+  // Computed once when card mounts, recomputed on resize.
+  const cachedCardAnchorRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Compute card anchor after card renders (or on resize).
+  useLayoutEffect(() => {
+    if (!focusedProject) {
+      cachedCardAnchorRef.current = null;
+      return;
+    }
+    const compute = () => {
+      if (!cardContainerRef.current || !mountRef.current) return;
+      const canvasR = mountRef.current.getBoundingClientRect();
+      const cardR = cardContainerRef.current.getBoundingClientRect();
+      // Target the bottom-left corner of the card: line exits card going down-left.
+      cachedCardAnchorRef.current = {
+        x: cardR.left - canvasR.left,
+        y: cardR.bottom - canvasR.top,
+      };
+    };
+    // Defer one rAF so the card has been painted before we measure it.
+    const handle = requestAnimationFrame(compute);
+    window.addEventListener("resize", compute);
+    return () => {
+      cancelAnimationFrame(handle);
+      window.removeEventListener("resize", compute);
+    };
+  // Only re-run when the focused project id changes, not every render.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedProject?.id]);
+
+  // Set up the per-frame marker update callback whenever focusedProject changes.
+  useEffect(() => {
+    if (!focusedProject) {
+      isTrackingRef.current = false;
+      markerUpdateCallbackRef.current = null;
+      // Hide SVG overlay
+      if (svgGroupRef.current) svgGroupRef.current.setAttribute("opacity", "0");
+      return;
+    }
+    // Hide until first valid position arrives (avoids (0,0) flash).
+    if (svgGroupRef.current) svgGroupRef.current.setAttribute("opacity", "0");
+
+    markerUpdateCallbackRef.current = (sx: number, sy: number) => {
+      // Reveal on first valid frame
+      const grp = svgGroupRef.current;
+      if (grp && grp.getAttribute("opacity") !== "1") {
+        grp.setAttribute("opacity", "1");
+      }
+      // Move dot
+      if (dotGroupRef.current) {
+        dotGroupRef.current.setAttribute("transform", `translate(${sx},${sy})`);
+      }
+      // Update leader line + gradient endpoints
+      const anchor = cachedCardAnchorRef.current;
+      if (svgLineRef.current && anchor) {
+        svgLineRef.current.setAttribute("x1", String(sx));
+        svgLineRef.current.setAttribute("y1", String(sy));
+        svgLineRef.current.setAttribute("x2", String(anchor.x));
+        svgLineRef.current.setAttribute("y2", String(anchor.y));
+      }
+      if (gradientRef.current && anchor) {
+        gradientRef.current.setAttribute("x1", String(sx));
+        gradientRef.current.setAttribute("y1", String(sy));
+        gradientRef.current.setAttribute("x2", String(anchor.x));
+        gradientRef.current.setAttribute("y2", String(anchor.y));
+      }
+    };
+  }, [focusedProject]);
+
+  useEffect(() => {
+    if (!flyToTarget || !flyToLatLngRef.current) return;
+    flyToLatLngRef.current(flyToTarget.lat, flyToTarget.lng);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyToTarget?.requestId]);
+
   useEffect(() => {
     const el = mountRef.current;
     if (!el) return;
@@ -203,6 +303,44 @@ export default function GlobeScene({
       const globe = new THREE.Group();
       globe.rotation.x = 0.25; // slight tilt
       scene.add(globe);
+
+      /* ── FlyTo state (tween globe quaternion to bring a lat/lng under the camera) ── */
+      let flyActive = false;
+      let rotationStopped = false; // permanently stops auto-rotation on first flyTo
+      let flyStartTime = 0;
+      const FLY_DURATION_MS = 1800;
+      const flyStartQuat = new THREE.Quaternion();
+      const flyEndQuat = new THREE.Quaternion();
+
+      // Compute the quaternion that brings latLngToVec3(lat,lng) onto the +Z axis
+      // (directly facing the camera), preserving a small tilt so the point sits
+      // slightly below centre — matches the camera's 0.2 y-offset.
+      const computeTargetQuat = (lat: number, lng: number) => {
+        const p = latLngToVec3(lat, lng, 1).normalize();
+        const facing = new THREE.Vector3(0, 0, 1);
+        const base = new THREE.Quaternion().setFromUnitVectors(p, facing);
+        // Lean slightly so the spot is a touch below dead-centre (aesthetic tilt).
+        const tilt = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0),
+          0.18,
+        );
+        return tilt.multiply(base);
+      };
+
+      // Stores the in-flight target so screen-pos can be computed after tween.
+      let flyTargetLat = 0;
+      let flyTargetLng = 0;
+
+      flyToLatLngRef.current = (lat: number, lng: number) => {
+        flyTargetLat = lat;
+        flyTargetLng = lng;
+        isTrackingRef.current = true; // start per-frame marker tracking immediately
+        flyStartQuat.copy(globe.quaternion);
+        flyEndQuat.copy(computeTargetQuat(lat, lng));
+        flyStartTime = performance.now();
+        flyActive = true;
+        rotationStopped = true;
+      };
 
       /* ── Load world map ── */
       let landImg: ImageData | null = null;
@@ -536,12 +674,43 @@ export default function GlobeScene({
 
       /* ── Animation ── */
       let t = 0;
+      // easeInOutCubic — smooth in & out for the flyTo tween.
+      const easeInOut = (k: number) =>
+        k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+
+      const applyFlyTween = () => {
+        if (!flyActive) {
+          if (!rotationStopped) globe.rotation.y += ROTATION_SPEED;
+          return;
+        }
+        const elapsed = performance.now() - flyStartTime;
+        const k = Math.min(1, elapsed / FLY_DURATION_MS);
+        const eased = easeInOut(k);
+        globe.quaternion.slerpQuaternions(flyStartQuat, flyEndQuat, eased);
+        if (k >= 1) flyActive = false;
+      };
+
+      // Helper: project flyTarget lat/lng → screen (x,y) and push to callback.
+      // Called every frame when isTrackingRef is true so the SVG dot/line
+      // always matches the rendered marker position (incl. during parallax).
+      const updateMarkerScreenPos = () => {
+        if (!isTrackingRef.current || !markerUpdateCallbackRef.current) return;
+        const p = latLngToVec3(flyTargetLat, flyTargetLng, GLOBE_RADIUS * 1.008)
+          .clone()
+          .applyMatrix4(globe.matrixWorld);
+        p.project(camera);
+        markerUpdateCallbackRef.current(
+          ((p.x + 1) / 2) * el.clientWidth,
+          ((-p.y + 1) / 2) * el.clientHeight,
+        );
+      };
+
       const animate = () => {
         if (dead) return;
         rafRef.current = requestAnimationFrame(animate);
         t += 0.016;
 
-        globe.rotation.y += ROTATION_SPEED;
+        applyFlyTween();
 
         // pulse rings expand + fade
         for (const ring of pulseRings) {
@@ -553,6 +722,8 @@ export default function GlobeScene({
         }
 
         renderer.render(scene, camera);
+        // Update after render so globe.matrixWorld is fresh for this frame.
+        updateMarkerScreenPos();
       };
       animate();
 
@@ -582,7 +753,7 @@ export default function GlobeScene({
         rafRef.current = requestAnimationFrame(animateWithParallax);
         t += 0.016;
 
-        globe.rotation.y += ROTATION_SPEED;
+        applyFlyTween();
 
         // subtle camera parallax
         camera.position.x += (mouseX * 0.15 - camera.position.x) * 0.02;
@@ -598,6 +769,8 @@ export default function GlobeScene({
         }
 
         renderer.render(scene, camera);
+        // Same per-frame tracking — captures parallax camera shift too.
+        updateMarkerScreenPos();
       };
       // cancel basic loop and start parallax loop
       cancelAnimationFrame(rafRef.current);
@@ -606,6 +779,9 @@ export default function GlobeScene({
       /* ── Cleanup ── */
       disposeRef.current = () => {
         dead = true;
+        flyToLatLngRef.current = null;
+        markerUpdateCallbackRef.current = null;
+        isTrackingRef.current = false;
         window.removeEventListener("resize", onResize);
         window.removeEventListener("mousemove", onMouse);
         cancelAnimationFrame(rafRef.current);
@@ -634,6 +810,91 @@ export default function GlobeScene({
 
       {/* ── HUD overlay ── */}
       <div className="absolute inset-0 pointer-events-none select-none">
+
+        {/* ── SVG leader line + pulsing dot ───────────────────────────────
+            Both are updated imperatively every RAF frame via markerUpdateCallbackRef
+            so they track the globe marker exactly, including during parallax shift. */}
+        <svg
+          className="absolute inset-0 w-full h-full"
+          style={{ overflow: "visible", zIndex: 25 }}
+        >
+          <defs>
+            {/* Gradient direction updated per-frame via gradientRef */}
+            <linearGradient
+              id="gs-leader-grad"
+              ref={gradientRef}
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop offset="0%" stopColor="rgba(245,210,89,0.85)" />
+              <stop offset="60%" stopColor="rgba(245,210,89,0.35)" />
+              <stop offset="100%" stopColor="rgba(245,210,89,0.1)" />
+            </linearGradient>
+          </defs>
+
+          {/* Group — starts hidden, revealed by first valid frame update */}
+          <g ref={svgGroupRef} opacity="0">
+            {/* Leader line from dot → card bottom-left */}
+            <line
+              ref={svgLineRef}
+              stroke="url(#gs-leader-grad)"
+              strokeWidth="1"
+              strokeDasharray="5 3"
+              strokeLinecap="round"
+            />
+
+            {/* Pulsing marker dot (transform set per-frame) */}
+            <g ref={dotGroupRef}>
+              {/* Outer slow pulse */}
+              <circle r="14" fill="rgba(245,210,89,0.04)">
+                <animate
+                  attributeName="r"
+                  values="10;18;10"
+                  dur="2.4s"
+                  repeatCount="indefinite"
+                />
+                <animate
+                  attributeName="opacity"
+                  values="0.15;0;0.15"
+                  dur="2.4s"
+                  repeatCount="indefinite"
+                />
+              </circle>
+              {/* Middle ring */}
+              <circle
+                r="7"
+                fill="rgba(245,210,89,0.08)"
+                stroke="rgba(245,210,89,0.45)"
+                strokeWidth="0.75"
+              />
+              {/* Core dot */}
+              <circle
+                r="3.5"
+                fill="rgba(245,210,89,0.95)"
+                filter="drop-shadow(0 0 4px rgba(245,210,89,0.8))"
+              />
+            </g>
+          </g>
+        </svg>
+
+        {/* ── Project info card — top-right ─────────────────────────────── */}
+        <AnimatePresence>
+          {focusedProject && (
+            <motion.div
+              key="card-wrapper"
+              className="absolute top-6 right-6 z-30 pointer-events-auto"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.15 }}
+            >
+              <ProjectPlacard
+                ref={cardContainerRef}
+                project={focusedProject}
+                onClose={() => setFocusedProject(null)}
+              />
+            </motion.div>
+          )}
+        </AnimatePresence>
         {/* Top-left branding */}
         <div className="absolute top-6 left-8 flex items-baseline gap-2">
           <span className="text-[11px] font-mono font-bold uppercase tracking-[0.35em] text-white/50">

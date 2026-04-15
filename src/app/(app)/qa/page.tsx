@@ -32,7 +32,10 @@ export default function QAPage() {
   const updateSurveyStatus = async (surveyId: string, newStatus: string) => {
     setActionLoading(surveyId);
     try {
-      await assetSvcClient.patch(`/api/v1/surveys/${surveyId}/status`, { status: newStatus });
+      // asset-svc mounts routes under /asset-svc/api/v1/... (see
+      // consts.RoutePrefix in the Go service); the status-only PATCH lives at
+      // /surveys/:id/status and emits a qa_audit_log row server-side.
+      await assetSvcClient.patch(`/asset-svc/api/v1/surveys/${surveyId}/status`, { status: newStatus });
       queryClient.invalidateQueries({ queryKey: ["surveys"] });
     } catch (e) {
       console.error("Failed to update survey status:", e);

@@ -1,5 +1,15 @@
 // API response types matching rendering-engine-be Go structs
 
+// --- Envelopes ---
+
+// ListEnvelope mirrors the backend's paginated list shape
+// (`{data, pagination}`). Every list endpoint returns this; non-list
+// endpoints return their object directly.
+export interface ListEnvelope<T> {
+  data: T[];
+  pagination: { limit: number; offset: number; total: number };
+}
+
 // --- Dashboard ---
 
 export interface DashboardRecentProject {
@@ -161,6 +171,12 @@ export interface MeasurementInventoryItem {
   id: string;
   name: string;
   feature_type: string;
+  // RFC7946 GeoJSON (stringified) for the measurement's footprint geometry.
+  // Sourced from `ST_AsGeoJSON(measurements.geom)` server-side. Consumers
+  // that just want numbers can ignore it; the /measurements page parses it
+  // to render a 3D preview of the selected stockpile without a second
+  // round-trip.
+  geojson: string;
   properties: Record<string, unknown> | null;
   is_locked: boolean;
   created_at: string;
@@ -169,6 +185,9 @@ export interface MeasurementInventoryItem {
   tonnage: number | null;
   material_type: string | null;
   area_m2: number | null;
+  // GCS URL to the per-pile GLB mesh produced by stockpile-inventory processor.
+  // Empty string when the processor has not yet generated a mesh.
+  mesh_url: string | null;
 }
 
 export interface MeasurementInventorySummary {
@@ -189,6 +208,107 @@ export interface MeasurementRecord {
   is_locked: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// --- Operational dashboard additions ---
+
+// InventorySummaryResponse is the client-wide rollup returned by
+// GET /api/v1/analytics/inventory/summary. Unlike MeasurementInventorySummary
+// (which is survey-scoped), this aggregates across every project's latest
+// survey — safe to bind to a top-level "Total Inventory" KPI.
+export interface InventorySummaryResponse {
+  total_volume_m3: number;
+  total_tonnage: number;
+  total_area_m2: number;
+  stockpile_count: number;
+  project_count: number;
+  latest_survey_date: string | null;
+}
+
+// ActivityEvent is a single row in the unified activity feed returned by
+// GET /api/v1/events/activity. Severity drives the badge colour;
+// related_kind + related_id allow the row to link back to its source.
+export interface ActivityEvent {
+  timestamp: string;
+  type: "alert" | "survey_ingest" | "project_update" | "reconciliation";
+  title: string;
+  subtitle: string;
+  severity: "critical" | "warning" | "info";
+  related_id: string;
+  related_kind: "survey" | "project" | "stockpile";
+}
+
+// ProcessingStatusProcessor is a single processor-type row in the breakdown
+// array returned by GET /api/v1/processing/active. Mirrors the Go struct of
+// the same name in rendering-engine-be/internal/repository/reader.go.
+export interface ProcessingStatusProcessor {
+  processor_type: string;
+  active: number;
+  failed: number;
+}
+
+// ProcessingStatus replaces the retired FleetStatus stub. It is the live
+// pipeline-health rollup the operator sees on the "Active processing" KPI
+// — queue depth, running jobs, and 24h throughput/failures across every
+// processor type for the caller's tenant.
+export interface ProcessingStatus {
+  active_count: number;
+  queued_count: number;
+  running_count: number;
+  completed_24h: number;
+  failed_24h: number;
+  total_24h: number;
+  last_completion: string | null;
+  by_processor: ProcessingStatusProcessor[];
+}
+
+// ProjectMaterial is one row in the materials dropdown. `last_seen` is the
+// most recent `analytics_stockpiles.created_at` for that material_type on
+// the project, used to sort newest-first in the picker.
+export interface ProjectMaterial {
+  material: string;
+  last_seen: string;
+}
+
+// MaterialsResponse is the envelope returned by
+// GET /api/v1/analytics/materials?project_id=<uuid>. Short list, no
+// pagination — we wrap in an object so the shape is forwards-compatible
+// with future fields (e.g. preferred_default) without a breaking change.
+export interface MaterialsResponse {
+  materials: ProjectMaterial[];
+}
+
+// SurveyDeltaPoint is a single snapshot inside a SurveyDeltaResponse.
+export interface SurveyDeltaPoint {
+  survey_id: string;
+  survey_date: string;
+  volume_m3: number;
+  tonnage: number;
+}
+
+// SurveyDeltaResponse is the fallback KPI payload returned by
+// GET /api/v1/analytics/survey-delta when fewer than two rows exist in
+// `analytics_temporal_snapshots` for the material. It derives the same
+// latest-vs-previous delta directly from `analytics_stockpiles` grouped
+// by survey, so the Last-Survey-Delta KPI populates as soon as the
+// second survey is ingested — without waiting for the temporal-trends
+// processor to run. `previous` is null on first survey ingest.
+export interface SurveyDeltaResponse {
+  latest: SurveyDeltaPoint | null;
+  previous: SurveyDeltaPoint | null;
+  delta_volume_m3: number;
+  delta_tonnage: number;
+  delta_pct: number;
+  is_anomaly: boolean;
+}
+
+// DashboardSummaryParams is the optional query-string shape for
+// useDashboardSummary. When both bounds are provided the backend filters
+// the recent-projects, alerts, and pipeline-activity aggregates to that
+// window; an omitted bound defaults server-side to (now-365d, now).
+export interface DashboardSummaryParams {
+  startDate?: string; // RFC3339
+  endDate?: string; // RFC3339
 }
 
 // --- Users ---

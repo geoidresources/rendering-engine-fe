@@ -58,7 +58,8 @@ import { ZoneAnalyticsPanel } from '../../components/viewer/ZoneAnalyticsPanel';
 import type { AnomalyAlert } from '../../components/viewer/AnomalyAlerts';
 import type { ZoneData } from '../../components/viewer/ZoneAnalyticsPanel';
 import type { SiteDistributionItem } from '../../components/viewer/SiteDistribution';
-import { apiClient } from '../../lib/http';
+import { apiClient, unwrapList } from '../../lib/http';
+import type { ListEnvelope } from '@/types/api';
 
 Ion.defaultAccessToken = '';
 
@@ -281,6 +282,9 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     }))
   );
 
+  // Subscribe to the flyTo bus separately to avoid triggering the big destructure re-render.
+  const flyToTarget = useViewerStore((s) => s.flyToTarget);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<CesiumViewer | null>(null);
 
@@ -361,10 +365,15 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         const projectId = surveyResp.data.project_id;
         if (!projectId || cancelled) return;
 
-        const siblingsResp = await apiClient.get<{ id: string; survey_date: string }[]>(`/api/v1/surveys?project_id=${projectId}`);
+        // /surveys is a list endpoint — unwrap the {data, pagination} envelope
+        // so the date-sort below operates on a plain array.
+        type SurveyRow = { id: string; survey_date: string };
+        const siblingsResp = await apiClient.get<ListEnvelope<SurveyRow>>(
+          `/api/v1/surveys?project_id=${projectId}`,
+        );
         if (cancelled) return;
 
-        const surveys = siblingsResp.data
+        const surveys = unwrapList<SurveyRow>(siblingsResp.data)
           .filter((s) => s.survey_date)
           .sort((a, b) => a.survey_date.localeCompare(b.survey_date))
           .map((s) => ({
@@ -378,9 +387,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         // Fetch temporal anomaly alerts for this project
         try {
           type TrendRow = { material: string; is_anomaly: boolean; anomaly_severity: string; anomaly_z_score: number };
-          const trendsResp = await apiClient.get<TrendRow[]>(`/api/v1/analytics/trends?project_id=${projectId}&material=`);
-          if (!cancelled && trendsResp.data?.length) {
-            const anomalies: AnomalyAlert[] = trendsResp.data
+          const trendsResp = await apiClient.get<ListEnvelope<TrendRow>>(
+            `/api/v1/analytics/trends?project_id=${projectId}&material=`,
+          );
+          const trendRows = unwrapList<TrendRow>(trendsResp.data);
+          if (!cancelled && trendRows.length) {
+            const anomalies: AnomalyAlert[] = trendRows
               .filter((t) => t.is_anomaly)
               .slice(0, 3)
               .map((t, i) => ({
@@ -397,10 +409,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         // Fetch stockpile totals for site distribution chart
         try {
           type StockpileRow = { material_type: string; volume_m3: number };
-          const stockpilesResp = await apiClient.get<StockpileRow[]>(`/api/v1/analytics/stockpiles?survey_id=${sid}`);
-          if (!cancelled && stockpilesResp.data?.length) {
+          const stockpilesResp = await apiClient.get<ListEnvelope<StockpileRow>>(
+            `/api/v1/analytics/stockpiles?survey_id=${sid}`,
+          );
+          const stockpileRows = unwrapList<StockpileRow>(stockpilesResp.data);
+          if (!cancelled && stockpileRows.length) {
             // Group by material and sum volume
-            const grouped = stockpilesResp.data.reduce<Record<string, number>>((acc, row) => {
+            const grouped = stockpileRows.reduce<Record<string, number>>((acc, row) => {
               const key = row.material_type || 'Unknown';
               acc[key] = (acc[key] ?? 0) + (row.volume_m3 ?? 0);
               return acc;
@@ -517,6 +532,33 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       duration: 1.5,
     });
   }, [manifest, boundsCenterLng, boundsCenterLat]);
+
+  // ---- FlyTo bus subscriber (triggered by sidebar project/survey clicks) ----
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed() || !flyToTarget) return;
+
+    if (flyToTarget.bounds) {
+      const { west, south, east, north } = flyToTarget.bounds;
+      viewer.camera.flyTo({
+        destination: Rectangle.fromDegrees(west, south, east, north),
+        orientation: { heading: 0, pitch: CesiumMath.toRadians(-90), roll: 0 },
+        duration: 2.0,
+      });
+    } else {
+      viewer.camera.flyTo({
+        destination: Cartesian3.fromDegrees(
+          flyToTarget.lng,
+          flyToTarget.lat,
+          flyToTarget.height ?? 3000,
+        ),
+        orientation: { heading: 0, pitch: CesiumMath.toRadians(-55), roll: 0 },
+        duration: 2.0,
+      });
+    }
+    // Only re-run when the requestId changes, not on every object-identity shift.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyToTarget?.requestId]);
 
   // ---- Camera Tracking ----
   useEffect(() => {

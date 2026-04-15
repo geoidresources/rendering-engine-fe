@@ -4,12 +4,10 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
-  FolderOpen,
   Upload,
   Ruler,
   GitCompare,
-  Map,
-  Layers3,
+  Globe,
   FileBarChart,
   CheckSquare,
   Shield,
@@ -22,12 +20,10 @@ import { AUTH_TOKEN_KEY } from "@/lib/constants";
 
 const NAV_ITEMS = [
   { id: "overview", label: "Overview", href: "/home", icon: LayoutDashboard },
-  { id: "projects", label: "Projects", href: "/projects", icon: FolderOpen },
   { id: "upload", label: "Upload", href: "/surveys/upload", icon: Upload },
   { id: "measurements", label: "Measurements", href: "/measurements", icon: Ruler },
   { id: "reconciliation", label: "Reconciliation", href: "/reconciliation", icon: GitCompare },
-  { id: "map-2d", label: "Map 2D", href: "/mapview", icon: Map, external: true },
-  { id: "map-3d", label: "Map 3D", href: "/viewer-3d", icon: Layers3 },
+  { id: "project", label: "Project", href: "/project", icon: Globe, external: true },
   { id: "reporting", label: "Reporting", href: "/reports", icon: FileBarChart },
   { id: "qa", label: "QA", href: "/qa", icon: CheckSquare },
   { id: "access", label: "Access", href: "/client-portal", icon: Shield },

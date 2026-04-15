@@ -25,8 +25,8 @@ export default function ClientPortalPage() {
     <div className="p-6 flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-accent text-lg font-bold uppercase tracking-wider">Client Portal</h1>
-        <Link href="/mapview">
-          <AppButton variant="primary" size="sm">Open 3D Viewer</AppButton>
+        <Link href="/project">
+          <AppButton variant="primary" size="sm">Open Project View</AppButton>
         </Link>
       </div>
 

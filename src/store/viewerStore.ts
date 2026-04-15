@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { Manifest } from '../types/manifest';
+import { Manifest, Bounds } from '../types/manifest';
 import { apiClient } from '../lib/http';
+import type { Project } from '../types/api';
 
 export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons' | 'site_model' | 'heatmap' | 'contours';
 export type TerrainMode = 'dtm' | 'dsm';
@@ -111,7 +112,31 @@ export interface ViewerState {
   activeSurveyId: string | null;
   setAvailableSurveys: (surveys: { id: string; date: string; label: string }[]) => void;
   switchSurvey: (id: string) => void;
+
+  // Focused project — set when a project is clicked; drives the placard overlay.
+  focusedProject: Project | null;
+  setFocusedProject: (project: Project | null) => void;
+
+  // FlyTo bus — set by UI (e.g. sidebar), consumed by globe/Cesium viewer.
+  // `requestId` increments on every call so repeated flyTo to the same coords
+  // still fires a new animation.
+  flyToTarget: FlyToTarget;
+  flyTo: (t: Omit<NonNullable<FlyToTarget>, 'requestId'>) => void;
+  clearFlyTo: () => void;
 }
+
+export type FlyToTarget = {
+  lng: number;
+  lat: number;
+  /** Optional camera height (metres). Cesium default ~3000m for projects, ~800m for surveys. */
+  height?: number;
+  /** Optional bbox — if provided, Cesium uses Rectangle.fromDegrees to frame it. */
+  bounds?: Bounds;
+  /** Human label for telemetry / tooltip (not required). */
+  label?: string;
+  /** Monotonic id; incremented on every flyTo() call so the effect fires on duplicates. */
+  requestId: number;
+} | null;
 
 const initialLayers: Record<LayerId, LayerState> = {
   ortho: { id: 'ortho', name: 'Orthomosaic', visible: true, opacity: 1, loading: false, error: null },
@@ -271,4 +296,17 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set({ activeSurveyId: id });
     loadManifest(id);
   },
+
+  focusedProject: null,
+  setFocusedProject: (project) => set({ focusedProject: project }),
+
+  flyToTarget: null,
+  flyTo: (t) =>
+    set((state) => ({
+      flyToTarget: {
+        ...t,
+        requestId: (state.flyToTarget?.requestId ?? 0) + 1,
+      },
+    })),
+  clearFlyTo: () => set({ flyToTarget: null }),
 }));

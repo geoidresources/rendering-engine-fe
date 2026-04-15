@@ -4,28 +4,29 @@ import { useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import type { SiteLocationProp } from "@/components/globe/GlobeScene";
-import { apiClient } from "@/lib/http";
-import type { Project, Survey } from "@/types/api";
+import { apiClient, unwrapList } from "@/lib/http";
+import type { ListEnvelope, Project, Survey } from "@/types/api";
 import type { Manifest } from "@/types/manifest";
+import { ProjectsSidebar } from "@/app/project/sidebar/ProjectsSidebar";
 
-const Viewer = dynamic(() => import("@/app/mapview/Viewer"), { ssr: false });
+const Viewer = dynamic(() => import("@/app/project/Viewer"), { ssr: false });
 const GlobeScene = dynamic(() => import("@/components/globe/GlobeScene"), { ssr: false });
 
 /**
  * Resolve project coordinates:
  *   1. project.settings.coordinates (explicit)
  *   2. first survey manifest bbox centre (derived)
+ *
+ * The previous implementation carried its own `unwrapList` defensive helper.
+ * It's been replaced with the shared one from `@/lib/http` so every caller
+ * shares the same shape-tolerance contract.
  */
-/** Unwrap the `{data: T[], pagination}` envelope that list endpoints use. */
-function unwrapList<T>(res: { data: unknown }): T[] {
-  const d = res.data as any;
-  return Array.isArray(d) ? d : Array.isArray(d?.data) ? d.data : [];
-}
 
 async function resolveProjectSites(): Promise<SiteLocationProp[]> {
-  const projects = unwrapList<Project>(
-    await apiClient.get("/api/v1/projects"),
+  const projRes = await apiClient.get<ListEnvelope<Project>>(
+    "/api/v1/projects",
   );
+  const projects = unwrapList<Project>(projRes.data);
   const sites: SiteLocationProp[] = [];
 
   for (const proj of projects) {
@@ -37,9 +38,10 @@ async function resolveProjectSites(): Promise<SiteLocationProp[]> {
 
     if (proj.survey_count > 0) {
       try {
-        const surveys = unwrapList<Survey>(
-          await apiClient.get(`/api/v1/surveys?project_id=${proj.id}`),
+        const survRes = await apiClient.get<ListEnvelope<Survey>>(
+          `/api/v1/surveys?project_id=${proj.id}`,
         );
+        const surveys = unwrapList<Survey>(survRes.data);
         const first = surveys[0];
         if (!first) continue;
         const manRes = await apiClient.get<Manifest>(
@@ -63,7 +65,7 @@ async function resolveProjectSites(): Promise<SiteLocationProp[]> {
   return sites;
 }
 
-export default function MapViewPage() {
+export default function ProjectPage() {
   const searchParams = useSearchParams();
   const surveyId = searchParams.get("surveyId") ?? undefined;
   const [sites, setSites] = useState<SiteLocationProp[]>([]);
@@ -79,8 +81,9 @@ export default function MapViewPage() {
   }
 
   return (
-    <div className="w-screen h-screen bg-[#020208]">
+    <div className="relative w-screen h-screen bg-[#020208]">
       <GlobeScene sites={sites} />
+      <ProjectsSidebar />
     </div>
   );
 }
