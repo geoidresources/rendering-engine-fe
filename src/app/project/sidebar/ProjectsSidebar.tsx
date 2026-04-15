@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, FolderOpen, AlertCircle } from "lucide-react";
+import { ChevronLeft, FolderOpen, AlertCircle, Home } from "lucide-react";
 import { apiClient, unwrapList } from "@/lib/http";
 import { cn } from "@/lib/utils";
 import { useViewerStore } from "@/store/viewerStore";
@@ -92,39 +92,74 @@ export function ProjectsSidebar() {
       )}
       aria-label="Projects"
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-border/60 px-3 py-3">
-        <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-        {!collapsed && (
-          <>
-            <div className="flex-1 min-w-0">
-              <div className="truncate text-[11px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
-                Projects
-              </div>
-              <div className="truncate text-[13px] font-semibold text-foreground">
-                {projectCount === 0 ? "—" : `${projectCount} total`}
-              </div>
-            </div>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((v) => !v)}
-          className={cn(
-            "grid h-7 w-7 shrink-0 place-items-center rounded-sm",
-            "text-muted-foreground hover:bg-white/5 hover:text-foreground",
-            "transition-colors",
-          )}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <ChevronLeft
+      {/* Collapsed strip — shown only when sidebar is collapsed */}
+      {collapsed && (
+        <div className="flex flex-col items-center gap-1 py-2">
+          <button
+            type="button"
+            onClick={() => router.push("/")}
             className={cn(
-              "h-4 w-4 transition-transform duration-200",
-              collapsed && "rotate-180",
+              "grid h-8 w-8 shrink-0 place-items-center rounded-sm",
+              "text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors",
             )}
-          />
-        </button>
-      </div>
+            aria-label="Go to home"
+            title="Home"
+          >
+            <Home className="h-4 w-4" />
+          </button>
+          <div className="h-px w-6 bg-border/60" />
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            className={cn(
+              "grid h-8 w-8 shrink-0 place-items-center rounded-sm",
+              "text-muted-foreground hover:bg-white/5 hover:text-primary transition-colors",
+            )}
+            aria-label="Expand sidebar"
+            title="Expand sidebar"
+          >
+            <FolderOpen className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Expanded header — shown only when sidebar is open */}
+      {!collapsed && (
+        <div className="flex items-center gap-2 border-b border-border/60 px-3 py-3">
+          <button
+            type="button"
+            onClick={() => router.push("/")}
+            className={cn(
+              "grid h-7 w-7 shrink-0 place-items-center rounded-sm",
+              "text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors",
+            )}
+            aria-label="Go to home"
+            title="Home"
+          >
+            <Home className="h-4 w-4" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="truncate text-[11px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
+              Projects
+            </div>
+            <div className="truncate text-[13px] font-semibold text-foreground">
+              {projectCount === 0 ? "—" : `${projectCount} total`}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCollapsed(true)}
+            className={cn(
+              "grid h-7 w-7 shrink-0 place-items-center rounded-sm",
+              "text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors",
+            )}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {/* Body — hidden when collapsed */}
       <AnimatePresence initial={false}>
