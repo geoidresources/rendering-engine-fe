@@ -23,7 +23,7 @@ export const CompassWidget: React.FC<CompassWidgetProps> = ({ onResetNorth }) =>
       onClick={onResetNorth}
       title="Reset to North"
       aria-label="Reset compass to north"
-      className="w-10 h-10 rounded-full bg-white/80 dark:bg-zinc-950/70 backdrop-blur-xl border border-zinc-200/70 dark:border-zinc-800/70 shadow-lg shadow-black/10 dark:shadow-black/30 grid place-items-center hover:bg-white dark:hover:bg-zinc-900 transition-colors"
+      className="grid h-10 w-10 place-items-center rounded-full border border-border bg-background/95 p-0 text-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60"
     >
       <svg
         width="24"

@@ -15,39 +15,40 @@ export const TimelineBar: React.FC = () => {
   if (surveys.length < 2) return null;
 
   return (
-    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1 rounded-2xl bg-white/80 dark:bg-zinc-950/70 backdrop-blur-xl border border-zinc-200/70 dark:border-zinc-800/70 shadow-xl shadow-black/10 dark:shadow-black/30 px-4 py-2">
-      {/* Connecting line */}
-      <div className="absolute top-1/2 left-6 right-6 h-px bg-zinc-300 dark:bg-zinc-700 -translate-y-px" />
-
-      {surveys.map((survey, i) => {
-        const isActive = survey.id === activeSurveyId;
-        return (
-          <button
-            key={survey.id}
-            type="button"
-            onClick={() => switchSurvey(survey.id)}
-            title={`Switch to ${survey.label}`}
-            className={`relative flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-colors ${
-              isActive
-                ? 'text-blue-600 dark:text-blue-400'
-                : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-            }`}
-          >
-            {/* Dot */}
-            <div
-              className={`w-3 h-3 rounded-full border-2 transition-colors ${
-                isActive
-                  ? 'bg-blue-600 dark:bg-blue-400 border-blue-600 dark:border-blue-400'
-                  : 'bg-white dark:bg-zinc-900 border-zinc-400 dark:border-zinc-500 hover:border-blue-400'
-              }`}
-            />
-            {/* Label */}
-            <span className={`text-[10px] font-mono whitespace-nowrap ${isActive ? 'font-bold' : ''}`}>
-              {survey.label}
-            </span>
-          </button>
-        );
-      })}
+    <div className="pointer-events-none absolute bottom-8 left-4 right-4 z-10 flex justify-center">
+      <div className="pointer-events-auto w-fit max-w-full rounded-2xl border border-border bg-background/95 px-4 py-3 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="scrollbar-none flex items-center gap-3 overflow-x-auto">
+          <span className="shrink-0 rounded-md border border-border bg-muted/40 px-2 py-1 text-[10px] font-medium text-muted-foreground">
+            Survey Timeline
+          </span>
+          <div className="relative flex min-w-max items-start gap-3 pr-1">
+            <div className="pointer-events-none absolute left-0 right-0 top-[6px] h-px bg-border" />
+            {surveys.map((survey) => {
+              const isActive = survey.id === activeSurveyId;
+              return (
+                <button
+                  key={survey.id}
+                  type="button"
+                  onClick={() => switchSurvey(survey.id)}
+                  title={`Switch to ${survey.label}`}
+                  className={`relative z-10 flex min-w-[72px] flex-col items-center gap-1 bg-transparent px-1 text-center transition-colors ${
+                    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <div
+                    className={`h-3 w-3 rounded-full border-2 ${
+                      isActive ? 'border-primary bg-primary' : 'border-border bg-background'
+                    }`}
+                  />
+                  <span className={`whitespace-nowrap text-[10px] font-mono ${isActive ? 'font-bold' : ''}`}>
+                    {survey.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -6,6 +6,12 @@
 
 import React from 'react';
 import { useViewerStore } from '../../store/viewerStore';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '../ui/card';
 
 export const HeatmapLegend: React.FC = () => {
   const visible = useViewerStore((s) => s.layers.heatmap.visible);
@@ -21,21 +27,25 @@ export const HeatmapLegend: React.FC = () => {
   const midLabel = '0';
 
   return (
-    <div className="absolute bottom-10 left-4 z-10 flex flex-col gap-1 rounded-xl bg-white/80 dark:bg-zinc-950/70 backdrop-blur-xl border border-zinc-200/70 dark:border-zinc-800/70 shadow-lg shadow-black/10 dark:shadow-black/30 p-3 w-40">
-      <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-        Cut / Fill
-      </span>
-      <div
-        className="h-3 rounded-sm"
-        style={{
-          background: 'linear-gradient(to right, #ef4444, #fca5a5, #ffffff, #93c5fd, #3b82f6)',
-        }}
-      />
-      <div className="flex justify-between text-[9px] font-mono text-zinc-500 dark:text-zinc-400">
-        <span>{minLabel}</span>
-        <span>{midLabel}</span>
-        <span>{maxLabel}</span>
-      </div>
-    </div>
+    <Card className="absolute bottom-10 left-4 z-10 w-44 border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <CardHeader className="pb-0">
+        <CardTitle className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+          Cut / Fill
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <div
+          className="h-3 rounded-sm"
+          style={{
+            background: 'linear-gradient(to right, #ef4444, #fca5a5, #ffffff, #93c5fd, #3b82f6)',
+          }}
+        />
+        <div className="flex justify-between text-[9px] font-mono text-muted-foreground">
+          <span>{minLabel}</span>
+          <span>{midLabel}</span>
+          <span>{maxLabel}</span>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

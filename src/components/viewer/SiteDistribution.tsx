@@ -6,6 +6,13 @@
 
 import React from 'react';
 import { BarChart3 } from 'lucide-react';
+import { Badge } from '../ui/badge';
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from '../ui/card';
 
 export interface SiteDistributionItem {
   label: string;
@@ -25,35 +32,33 @@ export const SiteDistribution: React.FC<SiteDistributionProps> = ({
   const maxValue = Math.max(...data.map((d) => d.value), 1);
 
   return (
-    <div className="w-72 rounded-lg bg-gray-900 border border-gray-700 shadow-lg shadow-black/30 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
+    <Card className="w-72 border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <CardHeader className="border-b">
         <div className="flex items-center gap-2">
-          <BarChart3 className="w-4 h-4 text-yellow-500" />
-          <span className="text-xs font-semibold uppercase tracking-wider text-gray-100">
-            Site Distribution
-          </span>
+          <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <BarChart3 className="size-4" />
+          </div>
+          <CardTitle className="text-sm">Site Distribution</CardTitle>
         </div>
-        <span className="text-[10px] font-mono uppercase text-gray-400">
+        <Badge variant="outline" className="font-mono uppercase">
           Year: {year}
-        </span>
-      </div>
+        </Badge>
+      </CardHeader>
 
-      {/* Bar chart */}
-      <div className="flex flex-col gap-2.5 px-4 py-3">
+      <CardContent className="flex flex-col gap-2.5">
         {data.map((item) => {
           const pct = Math.round((item.value / maxValue) * 100);
           return (
             <div key={item.label} className="flex flex-col gap-1">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-medium text-gray-300 truncate">
+                <span className="truncate text-[11px] font-medium text-foreground">
                   {item.label}
                 </span>
-                <span className="text-[10px] font-mono text-gray-400 ml-2 shrink-0">
+                <span className="ml-2 shrink-0 text-[10px] font-mono text-muted-foreground">
                   {item.value.toLocaleString()}
                 </span>
               </div>
-              <div className="h-1.5 rounded-full bg-gray-800 overflow-hidden">
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full rounded-full transition-all duration-300"
                   style={{ width: `${pct}%`, backgroundColor: item.color }}
@@ -62,7 +67,7 @@ export const SiteDistribution: React.FC<SiteDistributionProps> = ({
             </div>
           );
         })}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };

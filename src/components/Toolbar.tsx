@@ -3,109 +3,108 @@ import { MousePointer2, Ruler, Square, Hexagon, Home, ChevronDown } from 'lucide
 import Link from 'next/link';
 import { useViewerStore } from '../store/viewerStore';
 import { useProjects } from '../hooks/useProjects';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Separator } from './ui/separator';
 
 export const Toolbar: React.FC = () => {
   const { terrainMode, setTerrainMode, activeTool, setActiveTool } = useViewerStore();
   const { data: projects } = useProjects();
 
-  const iconButtonBase =
-    'h-9 w-9 grid place-items-center rounded-xl transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/60 focus-visible:ring-offset-2 focus-visible:ring-offset-white dark:focus-visible:ring-offset-zinc-950';
-  const iconButtonIdle =
-    'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/60';
-  const iconButtonActive = 'bg-blue-600/15 text-blue-600 dark:text-blue-400';
-
   return (
-    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-1.5 rounded-2xl border border-zinc-200/70 dark:border-zinc-800/70 bg-white/80 dark:bg-zinc-950/70 backdrop-blur-xl shadow-xl shadow-black/10 dark:shadow-black/30 p-1.5">
+    <div className="absolute left-1/2 top-4 z-10 flex -translate-x-1/2 items-center gap-2 rounded-2xl border bg-background/95 p-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
       <Link href="/home">
-        <button
-          className={`${iconButtonBase} ${iconButtonIdle}`}
+        <Button
+          variant="ghost"
+          size="icon"
           title="Back to Dashboard"
           aria-label="Back to Dashboard"
           type="button"
         >
-          <Home className="w-5 h-5" />
-        </button>
+          <Home className="size-5" />
+        </Button>
       </Link>
-      {/* Project selector */}
       {projects && projects.length > 0 && (
-        <button
+        <Button
           type="button"
-          className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-lg text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/60 transition-colors max-w-[140px]"
+          variant="ghost"
+          size="sm"
+          className="max-w-[180px] gap-1.5"
           title="Switch project"
           aria-label="Project selector"
         >
           <span className="truncate">{projects[0].name}</span>
-          <ChevronDown className="w-3 h-3 shrink-0 opacity-50" />
-        </button>
+          <ChevronDown className="size-3 shrink-0 opacity-50" />
+        </Button>
       )}
-      <div className="w-px h-6 bg-zinc-200/80 dark:bg-zinc-800/80 mx-1" />
-      <button
-        className={`${iconButtonBase} ${activeTool === 'select' ? iconButtonActive : iconButtonIdle}`}
+      <Separator orientation="vertical" className="mx-1 h-7" />
+      <Button
+        variant={activeTool === 'select' ? 'secondary' : 'ghost'}
+        size="icon"
         title="Select"
         aria-label="Select Tool"
         onClick={() => setActiveTool('select')}
         type="button"
       >
-        <MousePointer2 className="w-5 h-5" />
-      </button>
-      <div className="w-px h-6 bg-zinc-200/80 dark:bg-zinc-800/80 mx-1" />
-      <button
-        className={`${iconButtonBase} ${activeTool === 'distance' ? iconButtonActive : iconButtonIdle}`}
+        <MousePointer2 className="size-5" />
+      </Button>
+      <Button
+        variant={activeTool === 'distance' ? 'secondary' : 'ghost'}
+        size="icon"
         title="Measure Distance"
         aria-label="Measure Distance Tool"
         onClick={() => setActiveTool('distance')}
         type="button"
       >
-        <Ruler className="w-5 h-5" />
-      </button>
-      <button
-        className={`${iconButtonBase} ${activeTool === 'area' ? iconButtonActive : iconButtonIdle}`}
+        <Ruler className="size-5" />
+      </Button>
+      <Button
+        variant={activeTool === 'area' ? 'secondary' : 'ghost'}
+        size="icon"
         title="Measure Area"
         aria-label="Measure Area Tool"
         onClick={() => setActiveTool('area')}
         type="button"
       >
-        <Square className="w-5 h-5" />
-      </button>
-      <button
-        className={`${iconButtonBase} ${activeTool === 'volume' ? iconButtonActive : iconButtonIdle}`}
+        <Square className="size-5" />
+      </Button>
+      <Button
+        variant={activeTool === 'volume' ? 'secondary' : 'ghost'}
+        size="icon"
         title="Measure Volume"
         aria-label="Measure Volume Tool"
         onClick={() => setActiveTool('volume')}
         type="button"
       >
-        <Hexagon className="w-5 h-5" />
-      </button>
-      <div className="w-px h-6 bg-zinc-200/80 dark:bg-zinc-800/80 mx-1" />
+        <Hexagon className="size-5" />
+      </Button>
+      <Separator orientation="vertical" className="mx-1 h-7" />
       <div
-        className="inline-flex items-center rounded-xl border border-zinc-200/70 dark:border-zinc-800/70 bg-white/70 dark:bg-zinc-950/40 p-0.5"
+        className="inline-flex items-center gap-1 rounded-xl border bg-muted/30 p-1"
         role="group"
         aria-label="Terrain mode"
       >
-        <button
+        <Badge variant="outline" className="hidden sm:inline-flex">
+          Terrain
+        </Badge>
+        <Button
           type="button"
           onClick={() => setTerrainMode('dtm')}
-          className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-colors ${
-            terrainMode === 'dtm'
-              ? 'bg-blue-600 dark:bg-blue-500 text-white shadow-sm'
-              : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/60'
-          }`}
+          variant={terrainMode === 'dtm' ? 'default' : 'ghost'}
+          size="sm"
           title="Use bare-earth terrain"
         >
           DTM
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
           onClick={() => setTerrainMode('dsm')}
-          className={`px-2.5 py-1 text-[11px] font-semibold rounded-lg transition-colors ${
-            terrainMode === 'dsm'
-              ? 'bg-blue-600 dark:bg-blue-500 text-white shadow-sm'
-              : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100/80 dark:hover:bg-zinc-800/60'
-          }`}
+          variant={terrainMode === 'dsm' ? 'default' : 'ghost'}
+          size="sm"
           title="Use surface terrain (includes structures/vegetation)"
         >
           DSM
-        </button>
+        </Button>
       </div>
     </div>
   );

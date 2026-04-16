@@ -6,6 +6,7 @@
 
 import React, { useMemo } from 'react';
 import { useViewerStore } from '../../store/viewerStore';
+import { Card } from '../ui/card';
 
 /** Round scale stops in metres. */
 const STOPS = [
@@ -49,14 +50,14 @@ export const ScaleBar: React.FC = () => {
   }, [cameraHeight]);
 
   return (
-    <div className="flex flex-col items-start gap-0.5">
-      <span className="text-[9px] font-mono text-zinc-500 dark:text-zinc-400 leading-none">
+    <Card className="flex flex-col items-start gap-1 border bg-background/95 px-3 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <span className="text-[9px] leading-none font-mono text-muted-foreground">
         {label}
       </span>
       <div
-        className="h-1 bg-zinc-700 dark:bg-zinc-300 rounded-sm"
+        className="h-1 rounded-sm bg-foreground"
         style={{ width: `${widthPx}px` }}
       />
-    </div>
+    </Card>
   );
 };

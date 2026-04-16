@@ -1,7 +1,12 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Upload, FileText, X } from "lucide-react";
+import { motion } from "framer-motion";
+import { FileText, Sparkles, Upload, X } from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface FileUploadProps {
   label?: string;
@@ -50,41 +55,50 @@ export default function FileUpload({
   }
 
   return (
-    <div className={`flex flex-col gap-2 ${className}`}>
+    <div className={cn("flex flex-col gap-3", className)}>
       {label && (
-        <span className="text-text-muted text-xs font-medium uppercase tracking-wider px-1">
+        <span className="px-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
           {label}
         </span>
       )}
 
-      {/* Drop zone */}
-      <div
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+      <motion.div
+        whileHover={{ y: -2 }}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDragging(true);
+        }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         onClick={() => inputRef.current?.click()}
-        className={`
-          flex flex-col items-center justify-center gap-3 rounded-sm border-2 border-dashed cursor-pointer
-          transition-all p-10 text-center
-          ${isDragging
-            ? "border-primary bg-primary/10"
-            : "border-border-subtle bg-bg-surface hover:border-text-muted"
-          }
-        `}
+        className={cn(
+          "group relative cursor-pointer overflow-hidden rounded-3xl border border-dashed bg-gradient-to-br from-background to-muted/30 p-10 text-center transition-all duration-200",
+          isDragging
+            ? "border-primary bg-primary/5 shadow-[0_0_0_4px_rgba(59,130,246,0.08)]"
+            : "border-border/70 hover:border-primary/40 hover:bg-muted/30",
+        )}
       >
-        <div className="text-text-muted bg-bg-elevated p-3 rounded-sm">
-          <Upload size={20} />
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
+        <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm">
+          <Upload size={22} />
         </div>
-        <div>
-          <p className="text-text-secondary text-sm font-medium">
-            Drag & drop files here, or <span className="text-primary">browse</span>
+        <div className="mt-4 space-y-2">
+          <p className="text-base font-medium text-foreground">
+            Drag and drop files here, or <span className="text-primary">browse</span>
           </p>
-          <p className="text-text-muted text-xs mt-1 font-mono uppercase tracking-wider">
+          <p className="text-sm text-muted-foreground">
             {accept ? `Supports ${accept.replace(/,/g, ", ").toUpperCase()}` : "Any file format supported"}
             {maxSizeMB && ` (Max ${maxSizeMB}MB)`}
           </p>
         </div>
-      </div>
+        <div className="mt-4 flex items-center justify-center gap-2">
+          <Badge variant="outline">Multi-file</Badge>
+          <Badge variant="secondary">
+            <Sparkles className="size-3" />
+            Ready for ingest
+          </Badge>
+        </div>
+      </motion.div>
 
       <input
         ref={inputRef}
@@ -95,37 +109,44 @@ export default function FileUpload({
         onChange={(e) => handleFiles(e.target.files)}
       />
 
-      {/* File list */}
       {files.length > 0 && (
-        <div className="flex flex-col gap-2 mt-4">
-          <p className="text-[10px] font-medium text-text-muted uppercase tracking-widest px-1">
-            Selected Files
+        <div className="mt-2 flex flex-col gap-2">
+          <p className="px-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            Selected files
           </p>
           {files.map((f, i) => (
-            <div
+            <motion.div
               key={i}
-              className="flex items-center justify-between gap-3 rounded-sm bg-bg-elevated border border-border-subtle p-3 group hover:border-text-muted transition-colors"
+              layout
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center justify-between gap-3 rounded-2xl border bg-background/80 p-3 shadow-sm transition-colors hover:border-primary/30"
             >
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-sm bg-bg-surface flex items-center justify-center text-text-muted">
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground">
                   <FileText size={16} />
                 </div>
-                <div className="flex flex-col min-w-0">
-                  <span className="text-text-primary text-xs font-semibold truncate leading-4 font-mono">
+                <div className="flex min-w-0 flex-col">
+                  <span className="truncate text-sm font-medium leading-4 text-foreground">
                     {f.name}
                   </span>
-                  <span className="text-text-muted text-[10px] font-mono">
+                  <span className="text-xs text-muted-foreground">
                     {(f.size / 1024).toFixed(1)} KB
                   </span>
                 </div>
               </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); removeFile(i); }}
-                className="text-text-muted hover:text-error transition-colors bg-transparent border-none cursor-pointer p-1"
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeFile(i);
+                }}
               >
                 <X size={14} />
-              </button>
-            </div>
+              </Button>
+            </motion.div>
           ))}
         </div>
       )}

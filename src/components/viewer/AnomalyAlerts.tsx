@@ -6,6 +6,15 @@
 
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '../ui/card';
 
 export interface AnomalyAlert {
   id: string;
@@ -20,13 +29,13 @@ interface AnomalyAlertsProps {
   onReviewLog?: () => void;
 }
 
-const SEVERITY_STYLES: Record<string, { bg: string; text: string; label: string }> = {
-  alert: { bg: 'bg-red-500/20', text: 'text-red-400', label: 'ALERT' },
-  pending: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', label: 'PENDING' },
-  warning: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', label: 'PENDING' },
+const SEVERITY_STYLES: Record<string, { variant: 'destructive' | 'secondary' | 'outline'; label: string }> = {
+  alert: { variant: 'destructive', label: 'ALERT' },
+  pending: { variant: 'secondary', label: 'PENDING' },
+  warning: { variant: 'secondary', label: 'PENDING' },
 };
 
-const DEFAULT_SEVERITY = { bg: 'bg-gray-500/20', text: 'text-gray-400', label: 'INFO' };
+const DEFAULT_SEVERITY = { variant: 'outline' as const, label: 'INFO' };
 
 export const AnomalyAlerts: React.FC<AnomalyAlertsProps> = ({ alerts, onReviewLog }) => {
   const visible = alerts.slice(0, 3);
@@ -34,56 +43,49 @@ export const AnomalyAlerts: React.FC<AnomalyAlertsProps> = ({ alerts, onReviewLo
   if (visible.length === 0) return null;
 
   return (
-    <div className="w-72 rounded-lg bg-gray-900 border border-gray-700 shadow-lg shadow-black/30 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-700">
-        <AlertTriangle className="w-4 h-4 text-yellow-500" />
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-100">
-          Anomaly Alerts
-        </span>
-        {alerts.length > 0 && (
-          <span className="ml-auto text-[10px] font-mono text-gray-400">
-            {alerts.length}
-          </span>
-        )}
-      </div>
+    <Card className="w-72 border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <CardHeader className="border-b">
+        <div className="flex items-center gap-2">
+          <div className="flex size-8 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-300">
+            <AlertTriangle className="size-4" />
+          </div>
+          <CardTitle className="text-sm">Anomaly Alerts</CardTitle>
+          {alerts.length > 0 && (
+            <Badge variant="outline" className="ml-auto font-mono">
+              {alerts.length}
+            </Badge>
+          )}
+        </div>
+      </CardHeader>
 
-      {/* Alert list */}
-      <ul className="divide-y divide-gray-800">
+      <CardContent className="divide-y">
         {visible.map((alert) => {
           const style = SEVERITY_STYLES[alert.severity.toLowerCase()] ?? DEFAULT_SEVERITY;
           return (
-            <li key={alert.id} className="px-4 py-3 flex flex-col gap-1">
+            <div key={alert.id} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0">
               <div className="flex items-center gap-2">
-                <span
-                  className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${style.bg} ${style.text}`}
-                >
+                <Badge variant={style.variant} className="uppercase">
                   {style.label}
-                </span>
-                {alert.zone && (
-                  <span className="text-[11px] font-mono font-medium text-gray-200 truncate">
-                    {alert.zone}
-                  </span>
-                )}
+                </Badge>
+                {alert.zone && <span className="truncate text-[11px] font-medium">{alert.zone}</span>}
               </div>
-              <p className="text-[11px] leading-snug text-gray-400">
-                {alert.message}
-              </p>
-            </li>
+              <p className="text-[11px] leading-snug text-muted-foreground">{alert.message}</p>
+            </div>
           );
         })}
-      </ul>
+      </CardContent>
 
-      {/* Footer link */}
-      <div className="px-4 py-2.5 border-t border-gray-800">
-        <button
+      <CardFooter>
+        <Button
           type="button"
           onClick={onReviewLog}
-          className="text-[10px] font-semibold uppercase tracking-wider text-yellow-500 hover:text-yellow-400 transition-colors"
+          variant="ghost"
+          size="sm"
+          className="h-auto px-0 text-[11px] uppercase tracking-wider text-primary hover:text-primary"
         >
           Review Log &gt;
-        </button>
-      </div>
-    </div>
+        </Button>
+      </CardFooter>
+    </Card>
   );
 };

@@ -1,6 +1,16 @@
 import React from 'react';
 import { useViewerStore } from '../store/viewerStore';
 import { Info, Loader2, Ruler, Square, MapPinned, Trash2 } from 'lucide-react';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from './ui/card';
+import { ScrollArea } from './ui/scroll-area';
 
 function formatDistance(distanceMeters?: number): string {
   if (!distanceMeters || distanceMeters <= 0) return '0 m';
@@ -45,28 +55,30 @@ export const InspectorPanel: React.FC = () => {
   };
 
   return (
-    <div className="absolute top-0 right-0 w-80 max-h-[70vh] m-4 bg-white/80 dark:bg-zinc-950/70 backdrop-blur-xl rounded-2xl shadow-xl shadow-black/10 dark:shadow-black/30 border border-zinc-200/70 dark:border-zinc-800/70 z-10 flex flex-col overflow-hidden">
-      <div className="p-3 border-b border-zinc-200/70 dark:border-zinc-800/70 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Info className="w-4 h-4 text-zinc-600 dark:text-zinc-300" />
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white tracking-tight">
-            Inspector
-          </h3>
+    <Card className="absolute right-4 top-4 z-10 flex max-h-[70vh] w-80 overflow-hidden border bg-background/95 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      <CardHeader className="border-b">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Info className="size-4" />
+            </div>
+            <div>
+              <CardTitle className="text-sm">Inspector</CardTitle>
+              <CardDescription>Selection, measurements, and metadata</CardDescription>
+            </div>
+          </div>
+          {selectedFeature && (
+            <Button type="button" onClick={clearSelection} variant="ghost" size="sm">
+              Clear
+            </Button>
+          )}
         </div>
-        {selectedFeature && (
-          <button
-            type="button"
-            onClick={clearSelection}
-            className="text-xs text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors"
-          >
-            Clear
-          </button>
-        )}
-      </div>
-      <div className="p-3 overflow-y-auto text-xs text-zinc-700 dark:text-zinc-200 flex-1 space-y-3">
+      </CardHeader>
+      <ScrollArea className="flex-1">
+        <CardContent className="space-y-3 py-3 text-xs text-foreground">
         {(activeTool === 'distance' || activeTool === 'area' || activeTool === 'volume') && (
-          <div className="rounded-xl border border-blue-200/60 dark:border-blue-500/20 bg-blue-50/80 dark:bg-blue-500/10 p-3 text-[11px] leading-snug">
-            <div className="mb-2 flex items-center gap-2 text-blue-950 dark:text-blue-100">
+          <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 text-[11px] leading-snug">
+            <div className="mb-2 flex items-center gap-2 text-foreground">
               {activeTool === 'distance' ? (
                 <Ruler className="h-4 w-4" />
               ) : activeTool === 'area' ? (
@@ -86,11 +98,11 @@ export const InspectorPanel: React.FC = () => {
             {activeTool === 'distance' && (
               <>
                 <p>Click to place points. Double-click or right-click to finish.</p>
-                <p className="mt-2 text-blue-950 dark:text-blue-100">
+                <p className="mt-2 text-foreground">
                   Distance: <strong>{formatDistance(measurement.distanceMeters)}</strong>
                 </p>
                 {measurement.points.length > 0 && (
-                  <p className="mt-1 text-blue-950 dark:text-blue-100">
+                  <p className="mt-1 text-foreground">
                     Points: <strong>{measurement.points.length}</strong>
                   </p>
                 )}
@@ -100,10 +112,10 @@ export const InspectorPanel: React.FC = () => {
             {activeTool === 'area' && (
               <>
                 <p>Click to add polygon vertices. Right-click to close and measure.</p>
-                <p className="mt-2 text-blue-950 dark:text-blue-100">
+                <p className="mt-2 text-foreground">
                   Area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
                 </p>
-                <p className="mt-1 text-blue-950 dark:text-blue-100">
+                <p className="mt-1 text-foreground">
                   Vertices: <strong>{measurement.points.length}</strong>
                 </p>
               </>
@@ -112,56 +124,58 @@ export const InspectorPanel: React.FC = () => {
             {activeTool === 'volume' && (
               <>
                 <p>Draw a polygon around a stockpile. Right-click to close and compute volume.</p>
-                <p className="mt-2 text-blue-950 dark:text-blue-100">
+                <p className="mt-2 text-foreground">
                   Area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
                 </p>
                 {measurement.volumeCubicMeters !== undefined && (
-                  <p className="mt-1 text-blue-950 dark:text-blue-100">
+                  <p className="mt-1 text-foreground">
                     Volume: <strong>{formatVolume(measurement.volumeCubicMeters)}</strong>
                   </p>
                 )}
                 {measurement.status === 'drawing' && measurement.points.length >= 3 && measurement.volumeCubicMeters === undefined && (
-                  <p className="mt-1 text-blue-700 dark:text-blue-300 italic">Computing volume...</p>
+                  <p className="mt-1 italic text-primary">Computing volume...</p>
                 )}
-                <p className="mt-1 text-blue-950 dark:text-blue-100">
+                <p className="mt-1 text-foreground">
                   Vertices: <strong>{measurement.points.length}</strong>
                 </p>
               </>
             )}
 
             {measurement.status !== 'idle' && (
-              <button
+              <Button
                 type="button"
                 onClick={handleClearMeasurement}
-                className="mt-2 flex items-center gap-1.5 text-[11px] text-blue-700 dark:text-blue-300 hover:text-blue-900 dark:hover:text-blue-100 transition-colors"
+                variant="ghost"
+                size="sm"
+                className="mt-2 h-auto px-0 text-[11px] text-primary hover:text-primary"
               >
                 <Trash2 className="h-3 w-3" />
                 Clear measurement
-              </button>
+              </Button>
             )}
           </div>
         )}
 
         {activeTool !== 'select' && (
-          <p className="text-amber-900 dark:text-amber-200 bg-amber-50/80 dark:bg-amber-500/10 border border-amber-200/60 dark:border-amber-500/20 rounded-xl p-2 text-[11px] leading-snug">
+          <p className="rounded-xl border border-amber-500/20 bg-amber-500/10 p-2 text-[11px] leading-snug text-amber-950 dark:text-amber-100">
             Switch to <strong>Select</strong> in the toolbar to inspect GeoJSON regions, 3D Tiles features, or the site GLB model.
           </p>
         )}
 
         {selectedFeature && (
-          <div className="rounded-xl border border-zinc-200/70 dark:border-zinc-800/70 bg-white/70 dark:bg-zinc-950/30 p-3">
+          <div className="rounded-xl border bg-card p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div>
-                <p className="text-[11px] uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Selected feature</p>
-                <h4 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Selected feature</p>
+                <h4 className="text-sm font-semibold text-foreground">
                   {String(selectedFeature.name ?? selectedFeature.id ?? 'Unnamed feature')}
                 </h4>
               </div>
-              <span className="rounded-full bg-zinc-100/80 dark:bg-zinc-800/60 px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+              <Badge variant="outline" className="uppercase">
                 {String(selectedFeature._source ?? 'feature')}
-              </span>
+              </Badge>
             </div>
-            <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            <p className="text-[11px] text-muted-foreground">
               Feature ID: {String(selectedFeature.id ?? selectedFeature._entityId ?? 'n/a')}
             </p>
           </div>
@@ -184,43 +198,43 @@ export const InspectorPanel: React.FC = () => {
             {selectedAreaDetails && (
               <div className="space-y-2 text-[11px] text-emerald-950 dark:text-emerald-50">
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                  <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                     <p className="text-emerald-800/70 dark:text-emerald-200/70">Material</p>
                     <p className="font-semibold">{selectedAreaDetails.material}</p>
                   </div>
-                  <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                  <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                     <p className="text-emerald-800/70 dark:text-emerald-200/70">Status</p>
                     <p className="font-semibold">{selectedAreaDetails.status}</p>
                   </div>
-                  <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                  <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                     <p className="text-emerald-800/70 dark:text-emerald-200/70">Measured area</p>
                     <p className="font-semibold">{formatArea(selectedAreaDetails.areaSquareMeters)}</p>
                   </div>
-                  <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                  <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                     <p className="text-emerald-800/70 dark:text-emerald-200/70">Perimeter</p>
                     <p className="font-semibold">{formatDistance(selectedAreaDetails.perimeterMeters)}</p>
                   </div>
-                  <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                  <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                     <p className="text-emerald-800/70 dark:text-emerald-200/70">Avg elevation</p>
                     <p className="font-semibold">{selectedAreaDetails.averageElevationMeters.toFixed(1)} m</p>
                   </div>
-                  <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                  <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                     <p className="text-emerald-800/70 dark:text-emerald-200/70">Last surveyed</p>
                     <p className="font-semibold">{selectedAreaDetails.lastSurveyedAt}</p>
                   </div>
                 </div>
 
-                <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                   <p className="text-emerald-800/70 dark:text-emerald-200/70">Source</p>
                   <p className="font-semibold">{selectedAreaDetails.source}</p>
                 </div>
 
-                <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                   <p className="text-emerald-800/70 dark:text-emerald-200/70">Owner</p>
                   <p className="font-semibold">{selectedAreaDetails.owner}</p>
                 </div>
 
-                <div className="rounded-lg bg-white/80 dark:bg-zinc-950/30 p-2 border border-emerald-200/50 dark:border-emerald-500/20">
+                <div className="rounded-lg border border-emerald-500/20 bg-background/80 p-2 dark:bg-zinc-950/30">
                   <p className="text-emerald-800/70 dark:text-emerald-200/70">Notes</p>
                   <p>{selectedAreaDetails.notes}</p>
                 </div>
@@ -234,11 +248,12 @@ export const InspectorPanel: React.FC = () => {
             {JSON.stringify(selectedFeature, null, 2)}
           </pre>
         ) : (
-          <p className="text-zinc-500 dark:text-zinc-400">
+          <p className="text-muted-foreground">
             With <strong>Select</strong> active, click a region or feature on the map to inspect properties.
           </p>
         )}
-      </div>
-    </div>
+        </CardContent>
+      </ScrollArea>
+    </Card>
   );
 };

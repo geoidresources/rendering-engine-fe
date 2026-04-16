@@ -1214,7 +1214,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   };
 
   return (
-    <div className="relative w-full h-[100dvh] overflow-hidden flex bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+    <div className="relative flex h-[100dvh] w-full overflow-hidden bg-muted/20 text-foreground">
       <LayerPanel />
 
       <div className="flex-1 relative h-full min-w-0">
@@ -1223,7 +1223,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         <InspectorPanel />
 
         {/* Navigation controls — right side */}
-        <div className="absolute top-20 right-4 z-10 flex flex-col items-center gap-2">
+        <div className="absolute bottom-16 right-4 z-10 flex flex-col items-center gap-2">
           <CompassWidget onResetNorth={handleResetNorth} />
           <ZoomControls
             onZoomIn={handleZoomIn}
@@ -1236,7 +1236,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         </div>
 
         {/* Right sidebar panels — anomaly alerts, zone analytics, site distribution */}
-        <div className="absolute top-[340px] right-4 z-10 flex flex-col gap-3 max-h-[calc(100dvh-400px)] overflow-y-auto scrollbar-thin">
+        <div className="absolute right-4 top-[340px] z-10 flex max-h-[calc(100dvh-400px)] flex-col gap-3 overflow-y-auto pr-1">
           <ZoneAnalyticsPanel zone={zoneData} />
           <AnomalyAlerts alerts={liveAnomalies ?? DEMO_ANOMALY_ALERTS} />
           <SiteDistribution data={liveSiteDistrib ?? DEMO_SITE_DISTRIBUTION} />
@@ -1253,12 +1253,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
         {/* Global loading overlay */}
         {showLoader && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/60 backdrop-blur-sm pointer-events-none">
-            <div className="flex flex-col items-center gap-4 p-6 rounded-xl bg-zinc-900/90 border border-zinc-700/50 shadow-2xl">
-              <div className="w-10 h-10 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          <div className="pointer-events-none absolute inset-0 z-50 flex items-center justify-center bg-background/50 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-4 rounded-2xl border bg-background/95 p-6 shadow-2xl">
+              <div className="h-10 w-10 animate-spin rounded-full border-[3px] border-primary border-t-transparent" />
               <div className="flex flex-col items-center gap-1.5">
                 {activeLoads.map((msg) => (
-                  <span key={msg} className="text-sm text-zinc-300 font-medium">{msg}</span>
+                  <span key={msg} className="text-sm font-medium text-foreground">{msg}</span>
                 ))}
               </div>
             </div>
