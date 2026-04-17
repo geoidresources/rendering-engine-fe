@@ -3,7 +3,7 @@
 import React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useViewerStore } from "@/store/viewerStore";
-import { ProjectPlacard } from "@/app/project/sidebar/ProjectPlacard";
+import { ProjectPlacard } from "@/app/(app)/project/sidebar/ProjectPlacard";
 import type { SiteLocationProp } from "./types";
 
 /* ── Ref bundle ────────────────────────────────────────────────

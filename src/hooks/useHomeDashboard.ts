@@ -52,6 +52,8 @@ import type {
   MaterialsResponse,
   ProcessingStatus,
   ReconciliationRecord,
+  ReconciliationSummary,
+  StockpileZone,
   SurveyDeltaResponse,
   TemporalSnapshot,
 } from "@/types/api";
@@ -121,6 +123,36 @@ export function useHomeDashboard(options: UseHomeDashboardOptions = {}) {
     queryFn: async () => {
       const res = await apiClient.get<ListEnvelope<ReconciliationRecord>>(
         `/api/v1/analytics/reconciliation?project_id=${latestProjectId}`,
+      );
+      return unwrapList(res.data);
+    },
+    staleTime: 60_000,
+  });
+
+  // Reconciliation thresholds + totals. Drives the drift-sparkline's
+  // yellow/red reference bands. The green_pct/amber_pct fields already come
+  // from analytics_thresholds (client override or seeded __default__ row —
+  // see ADR 014) so we don't need a second endpoint.
+  const reconciliationSummary = useQuery<ReconciliationSummary>({
+    queryKey: ["analytics", "reconciliation-summary", latestProjectId],
+    enabled: !!latestProjectId,
+    queryFn: async () => {
+      const res = await apiClient.get<ReconciliationSummary>(
+        `/api/v1/analytics/reconciliation/summary?project_id=${latestProjectId}`,
+      );
+      return res.data;
+    },
+    staleTime: 60_000,
+  });
+
+  // Per-zone stockpile rollup. Populates the Zone Health Strip. Single-zone
+  // tenants will get a 1-element list; the UI hides the strip in that case.
+  const zoneHealth = useQuery<StockpileZone[]>({
+    queryKey: ["analytics", "stockpiles", "by-zone", latestProjectId],
+    enabled: !!latestProjectId,
+    queryFn: async () => {
+      const res = await apiClient.get<ListEnvelope<StockpileZone>>(
+        `/api/v1/analytics/stockpiles/by-zone?project_id=${latestProjectId}`,
       );
       return unwrapList(res.data);
     },
@@ -267,6 +299,8 @@ export function useHomeDashboard(options: UseHomeDashboardOptions = {}) {
     activity,
     processing,
     reconciliation,
+    reconciliationSummary,
+    zoneHealth,
     materials,
     trends,
     surveyDelta,

@@ -44,8 +44,15 @@ export function useIngestPipeline() {
         });
         surveyId = survey.id;
         store.setSurveyId(surveyId);
-      } catch {
-        toast.error("Failed to create survey record");
+      } catch (err: unknown) {
+        // Surface the server body (e.g. validation errors from asset-svc)
+        // instead of the generic "Failed to create survey record" — operators
+        // need the reason in the toast so they can correct the form.
+        const msg =
+          (err as { data?: { error?: string }; message?: string })?.data?.error ??
+          (err as { message?: string })?.message ??
+          "Failed to create survey record";
+        toast.error(msg);
         store.setIsIngesting(false);
         return;
       }

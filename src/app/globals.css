@@ -13,8 +13,8 @@
 
   --hud-white: #FFFFFF;
   --hud-white-hover: #CCCCCC;
-  --color-accent: #F5D259;
-  --color-accent-hover: #F7DC78;
+  --color-accent: #F59E0B;
+  --color-accent-hover: #FBBF24;
 
   --color-error: #FF4D4D;
   --color-warning: #FFB020;
@@ -40,8 +40,8 @@
   --popover: #1A1A1A;
   --popover-foreground: #E5E5E5;
 
-  --primary: #F5D259;             /* gold accent — CTA color */
-  --primary-hover: #F7DC78;
+  --primary: #F59E0B;             /* amber accent — CTA color */
+  --primary-hover: #FBBF24;
   --primary-foreground: #111111;
 
   --secondary: #252525;           /* bg-elevated */
@@ -50,7 +50,7 @@
   --muted: #252525;
   --muted-foreground: #999999;    /* text-secondary */
 
-  --accent: #F5D259;
+  --accent: #F59E0B;
   --accent-foreground: #111111;
 
   --destructive: #FF4D4D;
@@ -58,12 +58,12 @@
 
   --border: #2A2A2A;              /* border-subtle */
   --input: #2A2A2A;
-  --ring: #F5D259;
+  --ring: #F59E0B;
 
   --radius: 0.125rem;             /* Sharp corners for HUD look */
 
   /* Recharts theme colors */
-  --chart-1: #F5D259;             /* Gold */
+  --chart-1: #F59E0B;             /* Amber */
   --chart-2: #00E676;             /* Success green */
   --chart-3: #FF4D4D;             /* Error red */
   --chart-4: #FFB020;             /* Warning orange */
@@ -72,12 +72,12 @@
   /* Sidebar variables */
   --sidebar: #1A1A1A;
   --sidebar-foreground: #E5E5E5;
-  --sidebar-primary: #F5D259;
+  --sidebar-primary: #F59E0B;
   --sidebar-primary-foreground: #111111;
   --sidebar-accent: #252525;
   --sidebar-accent-foreground: #E5E5E5;
   --sidebar-border: #2A2A2A;
-  --sidebar-ring: #F5D259;
+  --sidebar-ring: #F59E0B;
 }
 
 @theme inline {
@@ -188,6 +188,20 @@ body {
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01", "ss03";
+}
+
+/* ── Numeric alignment ────────────────────────────────────────
+   Mining / volumetrics UI lives and dies by column-aligned numbers.
+   Any cell marked data-numeric gets tabular figures automatically;
+   tables & monospace contexts opt in too so stockpile volumes,
+   tonnages, and reconciliation variances line up without per-cell
+   utility classes. */
+[data-numeric],
+.font-mono,
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
 }
 
 @layer base {

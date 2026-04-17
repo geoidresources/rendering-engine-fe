@@ -7,6 +7,8 @@ export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons' | 'site_model' | 'hea
 export type TerrainMode = 'dtm' | 'dsm';
 export type ToolMode = 'select' | 'distance' | 'area' | 'volume';
 export type BlendPreset = 'stacked' | 'embedded';
+export type RightRailTab = 'overview' | 'layers' | 'inspector' | 'measurements' | 'compare';
+export type RailRevealReason = 'selection' | 'compare-on' | 'measurement-saved' | 'layer-toggled';
 
 export interface MeasurementPoint {
   longitude: number;
@@ -123,6 +125,16 @@ export interface ViewerState {
   flyToTarget: FlyToTarget;
   flyTo: (t: Omit<NonNullable<FlyToTarget>, 'requestId'>) => void;
   clearFlyTo: () => void;
+
+  // Right-rail UI: which tab is showing, and whether it is collapsed.
+  // `revealRailFor` is the contextual entry point — components call it
+  // when the user picks something / toggles compare / saves a measurement,
+  // and it auto-opens the rail to the matching tab.
+  rightRailTab: RightRailTab;
+  rightRailCollapsed: boolean;
+  setRightRailTab: (tab: RightRailTab) => void;
+  setRightRailCollapsed: (collapsed: boolean) => void;
+  revealRailFor: (reason: RailRevealReason) => void;
 }
 
 export type FlyToTarget = {
@@ -309,4 +321,17 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       },
     })),
   clearFlyTo: () => set({ flyToTarget: null }),
+
+  rightRailTab: 'overview',
+  rightRailCollapsed: false,
+  setRightRailTab: (rightRailTab) => set({ rightRailTab, rightRailCollapsed: false }),
+  setRightRailCollapsed: (rightRailCollapsed) => set({ rightRailCollapsed }),
+  revealRailFor: (reason) => {
+    const tab: RightRailTab =
+      reason === 'selection' ? 'inspector' :
+      reason === 'compare-on' ? 'compare' :
+      reason === 'measurement-saved' ? 'measurements' :
+      'layers';
+    set({ rightRailTab: tab, rightRailCollapsed: false });
+  },
 }));

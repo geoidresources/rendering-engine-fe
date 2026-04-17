@@ -6,7 +6,7 @@ import * as THREE from "three";
 import { feature } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import { useViewerStore } from "@/store/viewerStore";
-import { ProjectPlacard } from "@/app/project/sidebar/ProjectPlacard";
+import { ProjectPlacard } from "@/app/(app)/project/sidebar/ProjectPlacard";
 
 /* ── Constants ─────────────────────────────────────────── */
 

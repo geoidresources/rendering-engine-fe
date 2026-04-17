@@ -5,7 +5,7 @@ if (typeof window !== 'undefined') {
     typeof CESIUM_BASE_URL !== 'undefined' ? CESIUM_BASE_URL : '/cesiumStatic';
 }
 
-import React, { useEffect, useMemo, useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
   Ion,
@@ -40,26 +40,23 @@ import {
 } from 'cesium';
 
 // We do not import resium anymore
-import { useViewerStore } from '../../store/viewerStore';
-import { LayerPanel } from '../../components/LayerPanel';
-import { Toolbar } from '../../components/Toolbar';
-import { InspectorPanel } from '../../components/InspectorPanel';
-import { fetchMockAreaDetails } from '../../lib/mockAreaDetails';
-import { useMeasurementHandler } from '../../hooks/useMeasurementHandler';
-import { CompassWidget } from '../../components/viewer/CompassWidget';
-import { ZoomControls } from '../../components/viewer/ZoomControls';
-import { CoordinatesBar } from '../../components/viewer/CoordinatesBar';
-import { ScaleBar } from '../../components/viewer/ScaleBar';
-import { HeatmapLegend } from '../../components/viewer/HeatmapLegend';
-import { TimelineBar } from '../../components/viewer/TimelineBar';
-import { AnomalyAlerts } from '../../components/viewer/AnomalyAlerts';
-import { SiteDistribution } from '../../components/viewer/SiteDistribution';
-import { ZoneAnalyticsPanel } from '../../components/viewer/ZoneAnalyticsPanel';
-import type { AnomalyAlert } from '../../components/viewer/AnomalyAlerts';
-import type { ZoneData } from '../../components/viewer/ZoneAnalyticsPanel';
-import type { SiteDistributionItem } from '../../components/viewer/SiteDistribution';
-import { apiClient, unwrapList } from '../../lib/http';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { useViewerStore } from '@/store/viewerStore';
+import { useSiteStore } from '@/store/siteStore';
+import { useMeasurementHandler } from '@/hooks/useMeasurementHandler';
+import { CompassWidget } from '@/components/viewer/CompassWidget';
+import { ZoomControls } from '@/components/viewer/ZoomControls';
+import { CoordinatesBar } from '@/components/viewer/CoordinatesBar';
+import { ScaleBar } from '@/components/viewer/ScaleBar';
+import { HeatmapLegend } from '@/components/viewer/HeatmapLegend';
+import { TimelineBar } from '@/components/viewer/TimelineBar';
+import { RightRail } from '@/components/viewer/RightRail';
+import { ToolPalette } from '@/components/viewer/ToolPalette';
+import { apiClient, unwrapList } from '@/lib/http';
+import { rewriteGcsUrl } from '@/lib/assetUrl';
 import type { ListEnvelope } from '@/types/api';
+import { useSurvey } from '@/hooks/useSurveys';
+import { useProjects } from '@/hooks/useProjects';
 
 Ion.defaultAccessToken = '';
 
@@ -194,41 +191,6 @@ function normalizeSelectedFeature(
   };
 }
 
-/** Convert a GeoJSON selectedFeature (from the store) to ZoneData for the zone panel. */
-function deriveZoneData(feature: Record<string, unknown> | null): ZoneData | null {
-  if (!feature) return null;
-  // Only show zone panel for geojson / polygon features with volume properties
-  const src = feature._source as string | undefined;
-  if (src !== 'geojson' && src !== '3dTiles') return null;
-
-  const id = String(feature.id ?? feature.zone ?? feature._entityId ?? 'unknown');
-  const name = String(feature.name ?? feature.zone ?? feature.label ?? id);
-  const volumeM3 = Number(feature.volume_m3 ?? feature.total_volume_m3 ?? feature.volumeM3 ?? 0);
-  const massT = Number(feature.tonnage ?? feature.total_tonnage ?? feature.massT ?? feature.mass_t ?? 0);
-  const areaM2 = Number(feature.area_m2 ?? feature.total_area_m2 ?? feature.areaM2 ?? 0);
-  const lastSurveyed = String(feature.survey_date ?? feature.lastSurveyed ?? feature.last_surveyed ?? '—');
-
-  // Only show if at least volume or area is nonzero (real zone polygon, not a bare click)
-  if (volumeM3 === 0 && areaM2 === 0) return null;
-
-  return { id, name, volumeM3, massT, lastSurveyed, areaM2 };
-}
-
-/** Static anomaly alerts shown in the viewer sidebar when no live API data is available. */
-const DEMO_ANOMALY_ALERTS: AnomalyAlert[] = [
-  { id: 'a1', type: 'volume', severity: 'alert', message: 'Volume discrepancy detected — zone exceeds 5% variance from mass balance.', zone: 'Zone A' },
-  { id: 'a2', type: 'terrain', severity: 'pending', message: 'Terrain model pending reprocessing after new GCP alignment.', zone: 'Zone C' },
-  { id: 'a3', type: 'boundary', severity: 'warning', message: 'Stockpile boundary shifted > 2 m from previous survey.', zone: 'Zone B' },
-];
-
-/** Static site distribution data shown in the viewer sidebar. */
-const DEMO_SITE_DISTRIBUTION: SiteDistributionItem[] = [
-  { label: 'Coal', value: 42500, color: '#eab308' },
-  { label: 'Overburden', value: 31200, color: '#3b82f6' },
-  { label: 'Topsoil', value: 18700, color: '#22c55e' },
-  { label: 'Waste Rock', value: 12400, color: '#ef4444' },
-];
-
 interface ViewerProps {
   surveyId?: string;
 }
@@ -244,18 +206,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     manifest,
     activeTool,
     blendPreset,
-    selectedFeature,
     setSelectedFeature,
-    setSelectedAreaDetails,
-    setAreaDetailsLoading,
     pointBudget,
     setLayerError,
     setLayerLoading,
-    setMeasurement,
-    clearMeasurement,
     setCursorPosition,
     setAvailableSurveys,
-    activeSurveyId,
   } = useViewerStore(
     useShallow((s) => ({
       layers: s.layers,
@@ -267,18 +223,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       manifest: s.manifest,
       activeTool: s.activeTool,
       blendPreset: s.blendPreset,
-      selectedFeature: s.selectedFeature,
       setSelectedFeature: s.setSelectedFeature,
-      setSelectedAreaDetails: s.setSelectedAreaDetails,
-      setAreaDetailsLoading: s.setAreaDetailsLoading,
       pointBudget: s.pointBudget,
       setLayerError: s.setLayerError,
       setLayerLoading: s.setLayerLoading,
-      setMeasurement: s.setMeasurement,
-      clearMeasurement: s.clearMeasurement,
       setCursorPosition: s.setCursorPosition,
       setAvailableSurveys: s.setAvailableSurveys,
-      activeSurveyId: s.activeSurveyId,
     }))
   );
 
@@ -290,6 +240,54 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
   // Wire measurement tools (distance, area, volume) to Cesium drawing handlers
   useMeasurementHandler(viewerRef);
+
+  // ── ContextBar wiring ─────────────────────────────────────────────
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const siteViewMode = useSiteStore((s) => s.viewMode);
+  const siteActiveSurveyId = useSiteStore((s) => s.activeSurveyId);
+  const siteActiveProjectId = useSiteStore((s) => s.activeProjectId);
+  const setSiteActiveProject = useSiteStore((s) => s.setActiveProject);
+  const setSiteActiveSurvey = useSiteStore((s) => s.setActiveSurvey);
+
+  // Resolve project_id + name so we can seed siteStore even though Manifest only exposes siteId.
+  const { data: surveyDetail } = useSurvey(surveyIdProp ?? '');
+  const { data: projects = [] } = useProjects();
+  const resolvedProjectId = surveyDetail?.project_id ?? manifest?.siteId ?? null;
+  const resolvedProjectName = useMemo(
+    () => projects.find((p) => p.id === resolvedProjectId)?.name,
+    [projects, resolvedProjectId]
+  );
+
+  // Seed ContextBar store from URL / manifest so the selectors reflect reality.
+  useEffect(() => {
+    if (resolvedProjectId && resolvedProjectId !== siteActiveProjectId) {
+      setSiteActiveProject(resolvedProjectId, resolvedProjectName);
+    }
+    if (surveyIdProp && surveyIdProp !== siteActiveSurveyId) {
+      setSiteActiveSurvey(surveyIdProp);
+    }
+  }, [resolvedProjectId, resolvedProjectName, surveyIdProp, siteActiveProjectId, siteActiveSurveyId, setSiteActiveProject, setSiteActiveSurvey]);
+
+  // When ContextBar epoch selector changes, push a new URL so Viewer re-enters with that survey.
+  useEffect(() => {
+    if (!siteActiveSurveyId) return;
+    if (siteActiveSurveyId === surveyIdProp) return;
+    const params = new URLSearchParams(searchParams?.toString() ?? '');
+    params.set('surveyId', siteActiveSurveyId);
+    router.replace(`/project?${params.toString()}`);
+  }, [siteActiveSurveyId, surveyIdProp, router, searchParams]);
+
+  // Bind viewMode → Cesium scene morph
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    try {
+      if (siteViewMode === 'map') viewer.scene.morphTo2D(1);
+      else if (siteViewMode === 'split') viewer.scene.morphToColumbusView(1);
+      else viewer.scene.morphTo3D(1);
+    } catch { /* scene not ready */ }
+  }, [siteViewMode]);
 
   // Layer Refs to manage primitives iteratively
   const baseMapLayerRef = useRef<ImageryLayer | null>(null);
@@ -320,21 +318,22 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       // being silently dropped. Proper COPC rendering is a follow-up (either a
       // py3dtiles conversion step in the processor or a dedicated COPC loader).
       if (a.format === '3dtiles' || a.format === 'copc' || /tileset\.json/.test(a.url) || /\.copc\.laz$/i.test(a.url)) {
-        return a.url;
+        return rewriteGcsUrl(a.url);
       }
     }
     return undefined;
   }, [manifest]);
-  const orthoUrl = getAssetUrl('ortho');
+  const orthoUrl = rewriteGcsUrl(getAssetUrl('ortho'));
   const rawTerrainUrl = getAssetUrl(terrainMode === 'dtm' ? 'terrain_dtm' : 'terrain_dsm');
-  // Route terrain tiles through backend proxy to fix Content-Encoding for gzip-compressed .terrain files
+  // Terrain keeps its own proxy: it needs gzip decompression + layer.json
+  // enrichment that the generic asset proxy deliberately skips.
   const terrainUrl = rawTerrainUrl?.startsWith('https://storage.googleapis.com/')
     ? rawTerrainUrl.replace('https://storage.googleapis.com/', `${process.env.NEXT_PUBLIC_API_BASE_URL}/api/v1/terrain/proxy/`)
     : rawTerrainUrl;
-  const vectorUrl = getAssetUrl('vector');
-  const siteModelUrl = getAssetUrl('site_model', 'glb');
-  const heatmapUrl = getAssetUrl('heatmap');
-  const contourUrl = getAssetUrl('contours');
+  const vectorUrl = rewriteGcsUrl(getAssetUrl('vector'));
+  const siteModelUrl = rewriteGcsUrl(getAssetUrl('site_model', 'glb'));
+  const heatmapUrl = rewriteGcsUrl(getAssetUrl('heatmap'));
+  const contourUrl = rewriteGcsUrl(getAssetUrl('contours'));
   const orthoAsset = useMemo(() => manifest?.assets?.find((a) => a.assetType === 'ortho'), [manifest]);
   const heatmapAsset = useMemo(() => manifest?.assets?.find((a) => a.assetType === 'heatmap'), [manifest]);
 
@@ -383,52 +382,6 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
           }));
 
         setAvailableSurveys(surveys);
-
-        // Fetch temporal anomaly alerts for this project
-        try {
-          type TrendRow = { material: string; is_anomaly: boolean; anomaly_severity: string; anomaly_z_score: number };
-          const trendsResp = await apiClient.get<ListEnvelope<TrendRow>>(
-            `/api/v1/analytics/trends?project_id=${projectId}&material=`,
-          );
-          const trendRows = unwrapList<TrendRow>(trendsResp.data);
-          if (!cancelled && trendRows.length) {
-            const anomalies: AnomalyAlert[] = trendRows
-              .filter((t) => t.is_anomaly)
-              .slice(0, 3)
-              .map((t, i) => ({
-                id: `anomaly-${i}`,
-                type: 'volume',
-                severity: t.anomaly_severity ?? 'warning',
-                message: `${t.material}: anomaly detected (z=${t.anomaly_z_score?.toFixed(2) ?? '—'})`,
-                zone: t.material,
-              }));
-            if (anomalies.length > 0) setLiveAnomalies(anomalies);
-          }
-        } catch { /* non-critical */ }
-
-        // Fetch stockpile totals for site distribution chart
-        try {
-          type StockpileRow = { material_type: string; volume_m3: number };
-          const stockpilesResp = await apiClient.get<ListEnvelope<StockpileRow>>(
-            `/api/v1/analytics/stockpiles?survey_id=${sid}`,
-          );
-          const stockpileRows = unwrapList<StockpileRow>(stockpilesResp.data);
-          if (!cancelled && stockpileRows.length) {
-            // Group by material and sum volume
-            const grouped = stockpileRows.reduce<Record<string, number>>((acc, row) => {
-              const key = row.material_type || 'Unknown';
-              acc[key] = (acc[key] ?? 0) + (row.volume_m3 ?? 0);
-              return acc;
-            }, {});
-            const COLORS = ['#eab308', '#3b82f6', '#22c55e', '#ef4444', '#a855f7', '#f97316'];
-            const distrib: SiteDistributionItem[] = Object.entries(grouped)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 6)
-              .map(([label, value], i) => ({ label, value: Math.round(value), color: COLORS[i % COLORS.length] }));
-            if (distrib.length > 0) setLiveSiteDistrib(distrib);
-          }
-        } catch { /* non-critical */ }
-
       } catch {
         // Survey list is non-critical — silently ignore (timeline just stays hidden)
       }
@@ -436,6 +389,8 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
     return () => { cancelled = true; };
   }, [manifest?.surveyId, surveyIdProp, setAvailableSurveys]);
+
+  // Anomaly + stockpile analytics moved into RightRail's Overview tab.
 
   // ---- Initialize the Pure Cesium Viewer ----
   useEffect(() => {
@@ -599,11 +554,6 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     return () => { cursorHandler.destroy(); };
   }, [setCursorPosition]);
 
-  // ---- 3D/2D mode state ----
-  const [is3D, setIs3D] = useState(true);
-  const [liveAnomalies, setLiveAnomalies] = useState<AnomalyAlert[] | null>(null);
-  const [liveSiteDistrib, setLiveSiteDistrib] = useState<SiteDistributionItem[] | null>(null);
-
   // ---- Global loading overlay ----
   const isManifestLoading = !manifest;
   const activeLoads = useMemo(() => {
@@ -618,9 +568,6 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     return loads;
   }, [isManifestLoading, layers.dsm.loading, layers.ortho.loading, layers.laz.loading, layers.polygons.loading, layers.site_model.loading, layers.contours.loading]);
   const showLoader = activeLoads.length > 0;
-
-  // ---- Right sidebar data derivation ----
-  const zoneData = useMemo(() => deriveZoneData(selectedFeature), [selectedFeature]);
 
   // Invalidate cached site model height when terrain source changes
   useEffect(() => { siteModelHeightRef.current = null; }, [terrainUrl]);
@@ -1201,45 +1148,24 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     });
   };
 
-  const handleToggle3D = () => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    if (is3D) {
-      viewer.scene.morphTo2D(1);
-      setIs3D(false);
-    } else {
-      viewer.scene.morphTo3D(1);
-      setIs3D(true);
-    }
-  };
-
   return (
-    <div className="relative w-full h-[100dvh] overflow-hidden flex bg-zinc-50 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
-      <LayerPanel />
-
+    <div className="relative w-full h-[100dvh] overflow-hidden flex bg-bg-base text-text-primary">
+      {/* Canvas + on-canvas chrome */}
       <div className="flex-1 relative h-full min-w-0">
-        <Toolbar />
         <div ref={containerRef} className="absolute inset-0 w-full h-full outline-none" tabIndex={0} />
-        <InspectorPanel />
 
-        {/* Navigation controls — right side */}
-        <div className="absolute top-20 right-4 z-10 flex flex-col items-center gap-2">
+        {/* Tool palette — top-left, modes + DTM/DSM */}
+        <ToolPalette />
+
+        {/* Navigation controls — right side, sit above the rail */}
+        <div className="absolute top-4 right-4 z-10 flex flex-col items-center gap-2">
           <CompassWidget onResetNorth={handleResetNorth} />
           <ZoomControls
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onFitBounds={handleFitBounds}
-            onToggle3D={handleToggle3D}
-            is3D={is3D}
           />
           <ScaleBar />
-        </div>
-
-        {/* Right sidebar panels — anomaly alerts, zone analytics, site distribution */}
-        <div className="absolute top-[340px] right-4 z-10 flex flex-col gap-3 max-h-[calc(100dvh-400px)] overflow-y-auto scrollbar-thin">
-          <ZoneAnalyticsPanel zone={zoneData} />
-          <AnomalyAlerts alerts={liveAnomalies ?? DEMO_ANOMALY_ALERTS} />
-          <SiteDistribution data={liveSiteDistrib ?? DEMO_SITE_DISTRIBUTION} />
         </div>
 
         {/* Heatmap legend — bottom left */}
@@ -1253,18 +1179,21 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
         {/* Global loading overlay */}
         {showLoader && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/60 backdrop-blur-sm pointer-events-none">
-            <div className="flex flex-col items-center gap-4 p-6 rounded-xl bg-zinc-900/90 border border-zinc-700/50 shadow-2xl">
-              <div className="w-10 h-10 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin" />
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-bg-base/70 backdrop-blur-sm pointer-events-none">
+            <div className="flex flex-col items-center gap-4 p-6 rounded-xl bg-bg-surface border border-border-subtle shadow-2xl">
+              <div className="w-10 h-10 border-3 border-accent border-t-transparent rounded-full animate-spin" />
               <div className="flex flex-col items-center gap-1.5">
                 {activeLoads.map((msg) => (
-                  <span key={msg} className="text-sm text-zinc-300 font-medium">{msg}</span>
+                  <span key={msg} className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-muted">{msg}</span>
                 ))}
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Right rail — adaptive: Overview / Layers / Inspector / Measurements / Compare */}
+      <RightRail surveyId={surveyIdProp} projectId={resolvedProjectId ?? undefined} />
     </div>
   );
 }

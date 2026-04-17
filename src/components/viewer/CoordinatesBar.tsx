@@ -5,7 +5,7 @@
 'use client';
 
 import React from 'react';
-import { useViewerStore } from '../../store/viewerStore';
+import { useViewerStore } from '@/store/viewerStore';
 
 export const CoordinatesBar: React.FC = () => {
   const cursor = useViewerStore((s) => s.cursorPosition);
@@ -20,34 +20,36 @@ export const CoordinatesBar: React.FC = () => {
     m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${m.toFixed(0)} m`;
 
   return (
-    <div className="absolute bottom-0 inset-x-0 z-10 flex items-center justify-between gap-4 px-4 py-1.5 bg-white/70 dark:bg-zinc-950/60 backdrop-blur-md border-t border-zinc-200/70 dark:border-zinc-800/70 text-[10px] font-mono text-zinc-600 dark:text-zinc-400 select-none">
+    <div
+      className="absolute bottom-0 inset-x-0 z-10 flex items-center justify-between gap-4 px-4 py-1.5 bg-bg-base/80 supports-[backdrop-filter]:bg-bg-base/60 backdrop-blur-md border-t border-border-subtle text-[10px] font-mono text-text-muted select-none"
+      style={{ fontVariantNumeric: 'tabular-nums' }}
+    >
       <div className="flex items-center gap-4">
         {cursor ? (
           <>
             <span>
-              Lat <strong className="text-zinc-900 dark:text-zinc-100">{formatCoord(cursor.lat)}</strong>
+              LAT <strong className="text-text-primary">{formatCoord(cursor.lat)}</strong>
             </span>
             <span>
-              Lng <strong className="text-zinc-900 dark:text-zinc-100">{formatCoord(cursor.lng)}</strong>
+              LNG <strong className="text-text-primary">{formatCoord(cursor.lng)}</strong>
             </span>
             <span>
-              Elev <span className="text-zinc-400 dark:text-zinc-500">({vdatum})</span>{' '}
-              <strong className="text-zinc-900 dark:text-zinc-100">
+              ELEV <span className="text-text-muted">({vdatum})</span>{' '}
+              <strong className="text-text-primary">
                 {cursor.elevation !== null ? `${cursor.elevation.toFixed(1)} m` : '--'}
               </strong>
             </span>
           </>
         ) : (
-          <span className="text-zinc-400 dark:text-zinc-500">Hover over the map</span>
+          <span className="text-text-muted uppercase tracking-[0.2em]">Hover the canvas</span>
         )}
       </div>
 
       <div className="flex items-center gap-4">
         <span>
-          Camera{' '}
-          <strong className="text-zinc-900 dark:text-zinc-100">{formatAlt(cameraHeight)}</strong>
+          CAMERA <strong className="text-text-primary">{formatAlt(cameraHeight)}</strong>
         </span>
-        <span className="px-1.5 py-0.5 rounded bg-zinc-100/80 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400">
+        <span className="px-1.5 py-0.5 rounded-sm bg-bg-surface border border-border-subtle text-text-muted uppercase tracking-[0.15em]">
           {crs}
         </span>
       </div>

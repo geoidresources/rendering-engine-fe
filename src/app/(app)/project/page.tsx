@@ -7,9 +7,9 @@ import type { SiteLocationProp } from "@/components/globe/GlobeScene";
 import { apiClient, unwrapList } from "@/lib/http";
 import type { ListEnvelope, Project, Survey } from "@/types/api";
 import type { Manifest } from "@/types/manifest";
-import { ProjectsSidebar } from "@/app/project/sidebar/ProjectsSidebar";
+import { ProjectsSidebar } from "@/app/(app)/project/sidebar/ProjectsSidebar";
 
-const Viewer = dynamic(() => import("@/app/project/Viewer"), { ssr: false });
+const Viewer = dynamic(() => import("@/app/(app)/project/Viewer"), { ssr: false });
 const GlobeScene = dynamic(() => import("@/components/globe/GlobeScene"), { ssr: false });
 
 /**
@@ -81,7 +81,7 @@ export default function ProjectPage() {
   }
 
   return (
-    <div className="relative w-screen h-screen bg-[#020208]">
+    <div className="fixed inset-0 z-40 bg-[#020208]">
       <GlobeScene sites={sites} />
       <ProjectsSidebar />
     </div>

@@ -39,11 +39,9 @@ import {
 } from "lucide-react";
 import {
   CartesianGrid,
-  Cell,
   Line,
   LineChart,
-  Pie,
-  PieChart,
+  ReferenceArea,
   ReferenceDot,
   XAxis,
   YAxis,
@@ -63,8 +61,6 @@ import {
 } from "@/components/ui/card";
 import {
   ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
   type ChartConfig,
@@ -107,6 +103,10 @@ import type {
   PipelineRow,
   ProcessingStatus,
   ProjectMaterial,
+  ReconciliationRecord,
+  ReconciliationSummary,
+  StockpileZone,
+  SurveyDeltaResponse,
   TemporalSnapshot,
 } from "@/types/api";
 
@@ -222,6 +222,45 @@ function formatVolumeM3(v: number | null | undefined): string {
   return `${v.toFixed(1)} m³`;
 }
 
+// formatShortDate renders "01 Apr 2026" for a valid ISO string, or an em-dash
+// if the value is null/undefined or can't be parsed. PipelineRow.epoch has
+// historically come back as a bare YYYY-MM-DD but that's not a contract — be
+// permissive and never show "Invalid Date".
+function formatShortDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return "—";
+  return new Date(ms).toLocaleDateString("en-AU", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// formatStageLabel turns kebab-case pipeline stage names ("stockpile-inventory",
+// "vector-features") into display-friendly text ("Stockpile inventory"). The
+// backend emits the raw processor name; we don't want the operator staring at
+// internal identifiers.
+function formatStageLabel(stage: string | null | undefined): string {
+  if (!stage) return "—";
+  const spaced = stage.replace(/[-_]+/g, " ").trim();
+  if (!spaced) return "—";
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+// formatDuration hides uninformative "0s" / empty / missing durations behind an
+// em-dash. The backend's stage_timing computation doesn't always land — showing
+// "0s" makes every row look like it finished instantly, which is worse than
+// showing nothing.
+function formatDuration(d: string | null | undefined): string {
+  if (!d) return "—";
+  const trimmed = d.trim();
+  if (!trimmed || trimmed === "0s" || trimmed === "0" || trimmed === "0ms") {
+    return "—";
+  }
+  return trimmed;
+}
+
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) return "never";
   const then = new Date(iso).getTime();
@@ -283,6 +322,24 @@ function initialsFor(title: string): string {
   return parts.map((p) => p[0]?.toUpperCase() ?? "").join("") || "•";
 }
 
+// Data-freshness SLA: the operator's contract target is "survey every 72h".
+// TODO: look this up per-tenant from contract_sla_hours once the BE exposes
+// it; the fallback preserves today's behaviour.
+const FRESHNESS_TARGET_HOURS = 72;
+
+function freshnessBadge(iso: string | null | undefined): {
+  label: string;
+  variant: "default" | "secondary" | "destructive" | "outline";
+} {
+  if (!iso) return { label: "No data", variant: "outline" };
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return { label: "No data", variant: "outline" };
+  const ageHours = (Date.now() - ms) / 3_600_000;
+  if (ageHours <= 24) return { label: "Fresh", variant: "default" };
+  if (ageHours <= FRESHNESS_TARGET_HOURS) return { label: "OK", variant: "secondary" };
+  return { label: "Stale", variant: "destructive" };
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────
 
 export default function HomePage() {
@@ -306,8 +363,11 @@ export default function HomePage() {
     activity,
     processing,
     reconciliation,
+    reconciliationSummary,
+    zoneHealth,
     materials,
     trends,
+    surveyDelta,
     varianceCount,
     lastSurveyDelta,
     latestProjectId,
@@ -327,8 +387,6 @@ export default function HomePage() {
   const proc = processing.data;
 
   const pipelineRows = (s?.pipeline_rows ?? []) as PipelineRow[];
-  const pipelineCounts = s?.pipeline_counts ?? { complete: 0, processing: 0, failed: 0 };
-  const pipelineHealth = s?.pipeline_health_pct ?? 0;
   const alertCount = s?.alert_count ?? 0;
 
   const trendPoints = trends.data ?? [];
@@ -381,6 +439,7 @@ export default function HomePage() {
             onRetry={() => reconciliation.refetch()}
             varianceCount={varianceCount}
             totalSurveyed={(reconciliation.data ?? []).length}
+            summary={reconciliationSummary.data}
           />
           <KpiLastSurveyDelta
             loading={trends.isLoading && !trends.data}
@@ -397,17 +456,46 @@ export default function HomePage() {
             error={trends.isError}
             onRetry={() => trends.refetch()}
             points={trendPoints}
+            surveyDelta={surveyDelta.data ?? null}
             fallbackActivity={s?.pipeline_activity ?? []}
             materials={materialOptions}
             selectedMaterial={effectiveMaterial}
             onMaterialChange={setSelectedMaterial}
             rangeLabel={range}
           />
-          <VarianceDonutCard
+          <ReconciliationDriftCard
             className="lg:col-span-4"
-            counts={pipelineCounts}
-            healthPct={pipelineHealth}
-            loading={summary.isLoading}
+            records={reconciliation.data ?? []}
+            summary={reconciliationSummary.data}
+            loading={reconciliation.isLoading || reconciliationSummary.isLoading}
+            error={reconciliation.isError || reconciliationSummary.isError}
+            onRetry={() => {
+              reconciliation.refetch();
+              reconciliationSummary.refetch();
+            }}
+          />
+        </section>
+
+        <section className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+          <AnomalyInboxCard
+            className="lg:col-span-4"
+            loading={trends.isLoading || surveyDelta.isLoading}
+            error={trends.isError && surveyDelta.isError}
+            onRetry={() => {
+              trends.refetch();
+              surveyDelta.refetch();
+            }}
+            points={trendPoints}
+            surveyDelta={surveyDelta.data ?? null}
+            rangeLabel={range}
+            material={effectiveMaterial}
+          />
+          <ZoneHealthStrip
+            className="lg:col-span-8"
+            zones={zoneHealth.data ?? []}
+            loading={zoneHealth.isLoading}
+            error={zoneHealth.isError}
+            onRetry={() => zoneHealth.refetch()}
           />
         </section>
 
@@ -618,7 +706,18 @@ function StatusStrip({
               <p className="text-sm font-medium">{formatRelative(lastSync)}</p>
             </div>
           </div>
-          <Badge variant="outline">Sync</Badge>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Badge variant={freshnessBadge(lastSync).variant}>
+                  {freshnessBadge(lastSync).label}
+                </Badge>
+              }
+            />
+            <TooltipContent>
+              SLA target: survey within {FRESHNESS_TARGET_HOURS}h. Fresh ≤24h · OK ≤72h · Stale &gt;72h.
+            </TooltipContent>
+          </Tooltip>
         </CardContent>
       </Card>
     </section>
@@ -811,14 +910,20 @@ function KpiVarianceFlags({
   onRetry,
   varianceCount,
   totalSurveyed,
+  summary,
 }: {
   loading: boolean;
   error: boolean;
   onRetry: () => void;
   varianceCount: number;
   totalSurveyed: number;
+  summary: ReconciliationSummary | undefined;
 }) {
   const hot = varianceCount > 0;
+  const awaiting = totalSurveyed === 0;
+  const variancePct = summary?.variance_pct;
+  const amber = summary?.amber_count ?? 0;
+  const red = summary?.red_count ?? 0;
   return (
     <KpiShell
       labelId="kpi-variance-label"
@@ -828,14 +933,32 @@ function KpiVarianceFlags({
       error={error}
       onRetry={onRetry}
       footer={
-        <Badge variant={hot ? "destructive" : "outline"}>
-          {hot ? `${varianceCount} needs review` : "Within threshold"}
-        </Badge>
+        awaiting ? (
+          <span className="text-muted-foreground">Awaiting reconciliation</span>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            {red > 0 ? (
+              <Badge variant="destructive">{red} critical</Badge>
+            ) : null}
+            {amber > 0 ? (
+              <Badge variant="secondary">{amber} warning</Badge>
+            ) : null}
+            {red === 0 && amber === 0 ? (
+              <Badge variant="outline">Within threshold</Badge>
+            ) : null}
+          </div>
+        )
       }
     >
-      <div className="text-3xl font-semibold tabular-nums">{varianceCount}</div>
+      <div className="text-3xl font-semibold tabular-nums">
+        {awaiting ? "—" : varianceCount}
+      </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Across {totalSurveyed} reconciliations
+        {awaiting
+          ? "Run reconciliation to populate"
+          : variancePct != null
+            ? `${variancePct.toFixed(1)}% variance across ${totalSurveyed} run${totalSurveyed === 1 ? "" : "s"}`
+            : `Across ${totalSurveyed} reconciliations`}
       </p>
     </KpiShell>
   );
@@ -889,8 +1012,20 @@ function KpiLastSurveyDelta({
 
 const trendConfig = {
   value: { label: "Volume m³", color: "var(--chart-1, hsl(var(--primary)))" },
+  forecast: { label: "Forecast", color: "var(--chart-3, hsl(var(--muted-foreground)))" },
   activity: { label: "Pipeline activity", color: "var(--chart-2, hsl(var(--muted-foreground)))" },
 } satisfies ChartConfig;
+
+// depletionTone picks the chip colour. Red ≤30d is "act this week", amber ≤90d
+// is "plan reorder", otherwise the chip is muted so it doesn't cry wolf.
+function depletionTone(
+  daysToDepletion: number | null,
+): { variant: "destructive" | "secondary" | "outline"; label: string } {
+  if (daysToDepletion == null) return { variant: "outline", label: "—" };
+  if (daysToDepletion <= 30) return { variant: "destructive", label: `Depletion: ${daysToDepletion}d` };
+  if (daysToDepletion <= 90) return { variant: "secondary", label: `Depletion: ${daysToDepletion}d` };
+  return { variant: "outline", label: `Depletion: ${daysToDepletion}d` };
+}
 
 function InventoryTrendCard({
   className,
@@ -898,6 +1033,7 @@ function InventoryTrendCard({
   error,
   onRetry,
   points,
+  surveyDelta,
   fallbackActivity,
   materials,
   selectedMaterial,
@@ -909,15 +1045,20 @@ function InventoryTrendCard({
   error: boolean;
   onRetry: () => void;
   points: TemporalSnapshot[];
+  surveyDelta: SurveyDeltaResponse | null;
   fallbackActivity: { label: string; value: number }[];
   materials: ProjectMaterial[];
   selectedMaterial: string | undefined;
   onMaterialChange: (m: string | undefined) => void;
   rangeLabel: TimeRange;
 }) {
-  // Pre-compute the anomaly dots so we don't re-scan in render.
-  const { series, anomalies } = useMemo(() => {
-    const series = points.map((p) => ({
+  // Pre-compute the chart series, anomaly dots, and the depletion forecast.
+  // When `points` is empty the temporal-trends processor hasn't run yet (it
+  // needs ≥3 surveys to produce useful z-scores). We fall back to a 2-point
+  // series built from survey-delta's latest+previous so the operator still
+  // sees the real inventory move — not a placeholder pipeline chart.
+  const { series, anomalies, daysToDepletion, seriesSource } = useMemo(() => {
+    const base = points.map((p) => ({
       timestamp: p.created_at,
       label: new Date(p.created_at).toLocaleDateString("en-AU", {
         month: "short",
@@ -925,10 +1066,75 @@ function InventoryTrendCard({
       }),
       value: p.value,
       is_anomaly: p.is_anomaly,
+      forecast: null as number | null,
     }));
-    const anomalies = series.filter((p) => p.is_anomaly);
-    return { series, anomalies };
-  }, [points]);
+    const anomalies = base.filter((p) => p.is_anomaly);
+
+    const last = points[points.length - 1];
+    const depletionIso = last?.depletion_date ?? null;
+    let daysToDepletion: number | null = null;
+    let series: typeof base = base;
+
+    if (depletionIso) {
+      const depletionMs = Date.parse(depletionIso);
+      if (Number.isFinite(depletionMs) && depletionMs > Date.now()) {
+        daysToDepletion = Math.max(
+          0,
+          Math.round((depletionMs - Date.now()) / 86_400_000),
+        );
+        const withSeed = base.map((p, i) =>
+          i === base.length - 1 ? { ...p, forecast: p.value } : p,
+        );
+        series = [
+          ...withSeed,
+          {
+            timestamp: depletionIso,
+            label: new Date(depletionMs).toLocaleDateString("en-AU", {
+              month: "short",
+              year: "2-digit",
+            }),
+            value: null as unknown as number,
+            is_anomaly: false,
+            forecast: 0,
+          },
+        ];
+      }
+    }
+
+    if (
+      base.length === 0 &&
+      surveyDelta?.latest &&
+      surveyDelta?.previous
+    ) {
+      const toPoint = (s: { survey_date: string; volume_m3: number }, flag: boolean) => ({
+        timestamp: s.survey_date,
+        label: new Date(s.survey_date).toLocaleDateString("en-AU", {
+          month: "short",
+          year: "2-digit",
+        }),
+        value: s.volume_m3,
+        is_anomaly: flag,
+        forecast: null as number | null,
+      });
+      series = [
+        toPoint(surveyDelta.previous, false),
+        toPoint(surveyDelta.latest, surveyDelta.is_anomaly),
+      ];
+      return {
+        series,
+        anomalies: surveyDelta.is_anomaly ? [series[1]] : [],
+        daysToDepletion: null,
+        seriesSource: "survey-delta" as const,
+      };
+    }
+
+    return {
+      series,
+      anomalies,
+      daysToDepletion,
+      seriesSource: "temporal" as const,
+    };
+  }, [points, surveyDelta]);
 
   const showFallback = !loading && !error && series.length === 0;
 
@@ -942,8 +1148,27 @@ function InventoryTrendCard({
     <Card className={className} aria-labelledby="trend-title">
       <CardHeader>
         <CardTitle id="trend-title">Inventory trend · {rangeLabel}</CardTitle>
-        <CardDescription>
-          Snapshots across the selected window. Red dots mark anomalies flagged by the analytics pipeline.
+        <CardDescription className="flex flex-wrap items-center gap-2">
+          <span>
+            {seriesSource === "survey-delta"
+              ? "Latest vs previous survey. Temporal trend requires ≥3 surveys."
+              : "Snapshots across the selected window. Red dots mark anomalies flagged by the analytics pipeline."}
+          </span>
+          {daysToDepletion != null ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Badge variant={depletionTone(daysToDepletion).variant} className="gap-1">
+                    <TrendingDown className="size-3" />
+                    {depletionTone(daysToDepletion).label}
+                  </Badge>
+                }
+              />
+              <TooltipContent>
+                Projected exhaustion at current trend slope. Dashed line shows the forecast.
+              </TooltipContent>
+            </Tooltip>
+          ) : null}
         </CardDescription>
         <CardAction>
           <Select
@@ -974,7 +1199,8 @@ function InventoryTrendCard({
         ) : showFallback ? (
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">
-              No trend data yet — showing pipeline activity instead.
+              No surveys ingested yet for this project. Pipeline activity shown
+              as a proxy until the second survey arrives.
             </p>
             <ChartContainer config={trendConfig} className="h-[260px] w-full">
               <LineChart data={fallbackActivity}>
@@ -1006,6 +1232,16 @@ function InventoryTrendCard({
                 strokeWidth={2}
                 dot={false}
                 activeDot={{ r: 4 }}
+                connectNulls={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="forecast"
+                stroke="var(--color-forecast)"
+                strokeWidth={2}
+                strokeDasharray="4 4"
+                dot={false}
+                connectNulls
               />
               {anomalies.map((a) => (
                 <ReferenceDot
@@ -1027,71 +1263,424 @@ function InventoryTrendCard({
   );
 }
 
-// ── Variance donut ───────────────────────────────────────────────────────
+// ── Anomaly inbox ────────────────────────────────────────────────────────
 
-const varianceConfig = {
-  complete: { label: "Complete", color: "hsl(142 70% 45%)" },
-  processing: { label: "Processing", color: "hsl(217 91% 60%)" },
-  failed: { label: "Failed", color: "hsl(0 84% 60%)" },
-} satisfies ChartConfig;
+// anomalySeverityTone picks the chip variant from the free-form severity
+// string the BE emits ("low" / "medium" / "high" — we're liberal with what
+// we accept so a new server-side label doesn't break the client).
+function anomalySeverityTone(
+  sev: string | undefined,
+): "destructive" | "secondary" | "outline" {
+  const s = (sev ?? "").toLowerCase();
+  if (s === "high" || s === "critical") return "destructive";
+  if (s === "medium" || s === "warning") return "secondary";
+  return "outline";
+}
 
-function VarianceDonutCard({
+// AnomalyRow is the normalised shape the card renders — temporal-snapshots
+// anomalies and the last-survey-delta anomaly funnel into the same visual so
+// the operator sees a single "what went sideways" list regardless of which
+// analytics backend surfaced it.
+type AnomalyRow = {
+  key: string;
+  material: string;
+  timestamp: string;
+  zScore: number | null;
+  severity: string | undefined;
+  delta: number | null;
+  source: "temporal" | "survey-delta";
+};
+
+function AnomalyInboxCard({
   className,
-  counts,
-  healthPct,
   loading,
+  error,
+  onRetry,
+  points,
+  surveyDelta,
+  rangeLabel,
+  material,
 }: {
   className?: string;
-  counts: { complete: number; processing: number; failed: number };
-  healthPct: number;
   loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+  points: TemporalSnapshot[];
+  surveyDelta: SurveyDeltaResponse | null;
+  rangeLabel: TimeRange;
+  material: string | undefined;
 }) {
-  const data = useMemo(
-    () => [
-      { key: "complete", value: counts.complete, fill: "var(--color-complete)" },
-      { key: "processing", value: counts.processing, fill: "var(--color-processing)" },
-      { key: "failed", value: counts.failed, fill: "var(--color-failed)" },
-    ],
-    [counts],
-  );
-  const isEmpty = data.every((d) => d.value === 0);
+  const anomalies = useMemo<AnomalyRow[]>(() => {
+    const fromTrend: AnomalyRow[] = points
+      .filter((p) => p.is_anomaly)
+      .sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )
+      .map((p, i) => {
+        const prev = i < points.length - 1 ? points[i - 1]?.value ?? null : null;
+        return {
+          key: p.id,
+          material: p.material,
+          timestamp: p.created_at,
+          zScore: p.anomaly_z_score,
+          severity: p.anomaly_severity,
+          delta: prev != null ? p.value - prev : null,
+          source: "temporal" as const,
+        };
+      })
+      .slice(0, 3);
+
+    if (fromTrend.length > 0) return fromTrend;
+
+    // Survey-delta fallback: the temporal-snapshots series is often empty
+    // for young tenants (the trends processor needs ≥3 surveys). survey-delta
+    // runs directly on `analytics_stockpiles` and flags anomalies as soon as
+    // the second survey is ingested — that's the number we surface.
+    if (surveyDelta?.is_anomaly && surveyDelta.latest && surveyDelta.previous) {
+      return [
+        {
+          key: surveyDelta.latest.survey_id,
+          material: material ?? "all materials",
+          timestamp: surveyDelta.latest.survey_date,
+          zScore: null,
+          severity: Math.abs(surveyDelta.delta_pct) >= 50 ? "high" : "medium",
+          delta: surveyDelta.delta_volume_m3,
+          source: "survey-delta" as const,
+        },
+      ];
+    }
+    return [];
+  }, [points, surveyDelta, material]);
 
   return (
-    <Card className={className} aria-labelledby="donut-title">
+    <Card className={className} aria-labelledby="anomaly-title">
       <CardHeader>
-        <CardTitle id="donut-title">Variance distribution</CardTitle>
-        <CardDescription>Pipeline health across the current cohort.</CardDescription>
+        <CardTitle id="anomaly-title" className="flex items-center gap-2">
+          <AlertCircle className="size-4 text-destructive" />
+          Anomaly inbox
+        </CardTitle>
+        <CardDescription>
+          Last {rangeLabel.toLowerCase()} · {material ?? "all materials"}
+        </CardDescription>
+        {anomalies.length > 0 ? (
+          <CardAction>
+            <Badge variant="destructive">{anomalies.length}</Badge>
+          </CardAction>
+        ) : null}
       </CardHeader>
-      <CardContent className="relative">
+      <CardContent className="p-0">
         {loading ? (
-          <Skeleton className="h-[260px] w-full" />
-        ) : isEmpty ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">
-            No pipeline rows yet.
+          <div className="space-y-2 p-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-10 w-full" />
+            ))}
+          </div>
+        ) : error ? (
+          <div className="p-4">
+            <InlineError onRetry={onRetry} message="Couldn't load anomalies." />
+          </div>
+        ) : anomalies.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No anomalies detected in last {rangeLabel.toLowerCase()}.
           </p>
         ) : (
-          <>
-            <ChartContainer config={varianceConfig} className="mx-auto aspect-square h-[220px]">
-              <PieChart>
-                <ChartTooltip content={<ChartTooltipContent hideLabel />} />
-                <Pie data={data} dataKey="value" nameKey="key" innerRadius={60} outerRadius={90} strokeWidth={2}>
-                  {data.map((d) => (
-                    <Cell key={d.key} fill={d.fill} />
-                  ))}
-                </Pie>
-                <ChartLegend content={<ChartLegendContent nameKey="key" />} />
-              </PieChart>
-            </ChartContainer>
-            <div className="pointer-events-none absolute inset-0 top-[56px] flex flex-col items-center justify-start">
-              <span className="text-3xl font-semibold tabular-nums">
-                {Math.round(healthPct)}%
-              </span>
-              <span className="text-xs text-muted-foreground">healthy</span>
-            </div>
-          </>
+          <div className="divide-y">
+            {anomalies.map((a) => {
+              const up = (a.delta ?? 0) >= 0;
+              return (
+                <Link
+                  key={a.key}
+                  href="/reconciliation"
+                  className="flex items-center justify-between gap-3 p-3 hover:bg-muted/40"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{a.material}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {formatRelative(a.timestamp)}
+                      {a.zScore != null
+                        ? ` · z=${a.zScore.toFixed(1)}`
+                        : " · survey-delta"}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    {a.delta != null ? (
+                      <span
+                        className={`inline-flex items-center gap-1 text-xs tabular-nums ${up ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}`}
+                      >
+                        {up ? (
+                          <TrendingUp className="size-3" />
+                        ) : (
+                          <TrendingDown className="size-3" />
+                        )}
+                        {formatVolumeM3(a.delta)}
+                      </span>
+                    ) : null}
+                    <Badge variant={anomalySeverityTone(a.severity)}>
+                      {a.severity || "flagged"}
+                    </Badge>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ── Reconciliation drift ─────────────────────────────────────────────────
+
+const driftConfig = {
+  variance: { label: "Variance %", color: "var(--chart-1, hsl(var(--primary)))" },
+} satisfies ChartConfig;
+
+// classifyVariance reproduces the server's green/amber/red classifier on the
+// client so we can colour the chart dots without burning another request.
+// Matches the logic in analytics_thresholds (ADR 014).
+function classifyVariance(
+  absPct: number,
+  greenPct: number,
+  amberPct: number,
+): "green" | "amber" | "red" {
+  if (absPct <= greenPct) return "green";
+  if (absPct <= amberPct) return "amber";
+  return "red";
+}
+
+function ReconciliationDriftCard({
+  className,
+  records,
+  summary,
+  loading,
+  error,
+  onRetry,
+}: {
+  className?: string;
+  records: ReconciliationRecord[];
+  summary: ReconciliationSummary | undefined;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  // Deduplicate-and-sort the reconciliation series: one point per period_end.
+  // Multiple rows per period (one per material) collapse to the row with
+  // the largest absolute variance — the signal that would trip a threshold.
+  const { series, criticalDays, redCount, amberCount } = useMemo(() => {
+    const greenPct = summary?.thresholds?.green_pct ?? 3;
+    const amberPct = summary?.thresholds?.amber_pct ?? 7;
+
+    const perPeriod = new Map<
+      string,
+      { period_end: string; variance_pct: number; status: string }
+    >();
+    for (const r of records) {
+      const key = r.period_end;
+      const existing = perPeriod.get(key);
+      if (!existing || Math.abs(r.variance_pct) > Math.abs(existing.variance_pct)) {
+        perPeriod.set(key, {
+          period_end: r.period_end,
+          variance_pct: r.variance_pct,
+          status: r.status,
+        });
+      }
+    }
+    const sorted = [...perPeriod.values()].sort(
+      (a, b) =>
+        new Date(a.period_end).getTime() - new Date(b.period_end).getTime(),
+    );
+    const series = sorted.map((r) => ({
+      label: new Date(r.period_end).toLocaleDateString("en-AU", {
+        day: "2-digit",
+        month: "short",
+      }),
+      period_end: r.period_end,
+      variance_pct: r.variance_pct,
+      abs_pct: Math.abs(r.variance_pct),
+      band: classifyVariance(Math.abs(r.variance_pct), greenPct, amberPct),
+    }));
+
+    const redCount = series.filter((s) => s.band === "red").length;
+    const amberCount = series.filter((s) => s.band === "amber").length;
+    const criticalDays = series.filter((s) => s.band !== "green").length;
+
+    return { series, criticalDays, redCount, amberCount };
+  }, [records, summary]);
+
+  const green = summary?.thresholds?.green_pct ?? 3;
+  const amber = summary?.thresholds?.amber_pct ?? 7;
+  const isEmpty = !loading && !error && series.length === 0;
+
+  // Y-axis domain: clamp to ±(amber * 1.5) but always include any outlier
+  // so a 15% row doesn't get clipped silently.
+  const absMax = series.reduce((m, s) => Math.max(m, s.abs_pct), amber);
+  const domainMax = Math.max(amber * 1.5, absMax * 1.1);
+
+  return (
+    <Card className={className} aria-labelledby="drift-title">
+      <CardHeader>
+        <CardTitle id="drift-title">Reconciliation drift</CardTitle>
+        <CardDescription>
+          Variance % by period · green band ≤{green}% · red &gt;{amber}%
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <Skeleton className="h-[220px] w-full" />
+        ) : error ? (
+          <InlineError onRetry={onRetry} message="Couldn't load reconciliation drift." />
+        ) : isEmpty ? (
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            No reconciliation runs yet.
+          </p>
+        ) : (
+          <ChartContainer config={driftConfig} className="h-[220px] w-full">
+            <LineChart data={series}>
+              <CartesianGrid vertical={false} strokeDasharray="3 3" />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} fontSize={11} />
+              <YAxis
+                tickLine={false}
+                axisLine={false}
+                width={32}
+                fontSize={11}
+                domain={[-domainMax, domainMax]}
+                tickFormatter={(v) => `${v}%`}
+              />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <ReferenceArea y1={-green} y2={green} fill="hsl(142 70% 45%)" fillOpacity={0.08} />
+              <ReferenceArea y1={green} y2={amber} fill="hsl(48 96% 53%)" fillOpacity={0.1} />
+              <ReferenceArea y1={-amber} y2={-green} fill="hsl(48 96% 53%)" fillOpacity={0.1} />
+              <ReferenceArea y1={amber} y2={domainMax} fill="hsl(0 84% 60%)" fillOpacity={0.1} />
+              <ReferenceArea y1={-domainMax} y2={-amber} fill="hsl(0 84% 60%)" fillOpacity={0.1} />
+              <Line
+                type="monotone"
+                dataKey="variance_pct"
+                stroke="var(--color-variance)"
+                strokeWidth={2}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+              />
+              {series
+                .filter((s) => s.band === "red")
+                .map((s) => (
+                  <ReferenceDot
+                    key={s.period_end}
+                    x={s.label}
+                    y={s.variance_pct}
+                    r={5}
+                    fill="var(--destructive, #ef4444)"
+                    stroke="var(--background, #fff)"
+                    strokeWidth={1.5}
+                    ifOverflow="extendDomain"
+                  />
+                ))}
+            </LineChart>
+          </ChartContainer>
+        )}
+      </CardContent>
+      {!isEmpty && !loading && !error ? (
+        <CardFooter className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">
+            {criticalDays} / {series.length} periods out of threshold
+          </span>
+          <span className="flex items-center gap-2">
+            {redCount > 0 ? <Badge variant="destructive">{redCount} red</Badge> : null}
+            {amberCount > 0 ? <Badge variant="secondary">{amberCount} amber</Badge> : null}
+          </span>
+        </CardFooter>
+      ) : null}
+    </Card>
+  );
+}
+
+// ── Zone health strip ────────────────────────────────────────────────────
+
+// zoneTone picks the pill colour from the zone's ratio of tonnage vs the
+// fleet-wide mean. Zones pulling above 150% of mean are "hot" (likely the
+// most-active pit), zones below 30% are "cold" (possibly stale). Everything
+// else is "steady". This is a visual hint, not a threshold breach — the
+// real breach surface is the reconciliation drift card.
+function zoneTone(
+  zoneTonnage: number,
+  meanTonnage: number,
+): { variant: "default" | "secondary" | "destructive" | "outline"; label: string } {
+  if (meanTonnage <= 0) return { variant: "outline", label: "—" };
+  const ratio = zoneTonnage / meanTonnage;
+  if (ratio >= 1.5) return { variant: "destructive", label: "Hot" };
+  if (ratio <= 0.3) return { variant: "secondary", label: "Cold" };
+  return { variant: "default", label: "Steady" };
+}
+
+function ZoneHealthStrip({
+  className,
+  zones,
+  loading,
+  error,
+  onRetry,
+}: {
+  className?: string;
+  zones: StockpileZone[];
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+}) {
+  const meanTonnage = useMemo(() => {
+    if (zones.length === 0) return 0;
+    return zones.reduce((s, z) => s + z.total_tonnage, 0) / zones.length;
+  }, [zones]);
+
+  if (loading) {
+    return (
+      <section aria-label="Zone health" className={className}>
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20 w-56 shrink-0" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section aria-label="Zone health" className={className}>
+        <InlineError onRetry={onRetry} message="Couldn't load zone health." />
+      </section>
+    );
+  }
+
+  // Single-zone (or zero-zone) tenants don't need the strip — the KPIs
+  // already cover the whole site. Rendering a one-tile strip would just be
+  // noise, so we bail out entirely.
+  if (zones.length < 2) return null;
+
+  return (
+    <section aria-label="Zone health" className={className}>
+      <div className="flex gap-3 overflow-x-auto pb-1">
+        {zones.map((z) => {
+          const tone = zoneTone(z.total_tonnage, meanTonnage);
+          return (
+            <Card key={z.zone} size="sm" className="w-56 shrink-0">
+              <CardContent className="flex flex-col gap-1 py-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-medium" title={z.zone}>
+                    {z.zone}
+                  </span>
+                  <Badge variant={tone.variant}>{tone.label}</Badge>
+                </div>
+                <span className="text-lg font-semibold tabular-nums">
+                  {formatTonnes(z.total_tonnage)}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {z.pile_count} stockpiles · {formatVolumeM3(z.total_volume_m3)}
+                </span>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1116,7 +1705,7 @@ function PipelineTableCard({
         <CardTitle id="pipeline-title">Survey pipeline</CardTitle>
         <CardDescription>Most recent ingests and their stage.</CardDescription>
         <CardAction>
-          <Button variant="ghost" size="sm" render={<Link href="/surveys/upload" />}>
+          <Button variant="ghost" size="sm" render={<Link href="/projects" />}>
             View all
             <ArrowUpRight className="size-3.5" />
           </Button>
@@ -1153,21 +1742,17 @@ function PipelineTableCard({
                 const sb = statusBadge(r.status);
                 return (
                   <TableRow key={`${r.project}-${r.epoch}-${i}`}>
-                    <TableCell className="font-medium">{r.project}</TableCell>
-                    <TableCell className="text-muted-foreground">
-                      {r.epoch
-                        ? new Date(r.epoch).toLocaleDateString("en-AU", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : "—"}
+                    <TableCell className="min-w-0 max-w-[220px] truncate font-medium">
+                      {r.project}
+                    </TableCell>
+                    <TableCell className="min-w-0 truncate text-muted-foreground">
+                      {formatShortDate(r.epoch)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="outline">{r.stage}</Badge>
+                      <Badge variant="outline">{formatStageLabel(r.stage)}</Badge>
                     </TableCell>
                     <TableCell className="text-right tabular-nums text-muted-foreground">
-                      {r.duration || "—"}
+                      {formatDuration(r.duration)}
                     </TableCell>
                     <TableCell>
                       <Badge variant={sb.variant}>{sb.label}</Badge>
@@ -1280,7 +1865,7 @@ function ShortcutRow() {
 
   return (
     <section aria-label="Shortcuts" className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" render={<Link href="/reconcile" />}>
+      <Button variant="outline" size="sm" render={<Link href="/reconciliation" />}>
         <Scale className="size-3.5" />
         Reconcile
       </Button>
@@ -1301,11 +1886,11 @@ function ShortcutRow() {
         <ShieldCheck className="size-3.5" />
         QA review
       </Button>
-      <Button variant="outline" size="sm" render={<Link href="/viewer" />}>
+      <Button variant="outline" size="sm" render={<Link href="/viewer-3d" />}>
         <Box className="size-3.5" />
         3D viewer
       </Button>
-      <Button variant="outline" size="sm" render={<Link href="/analytics" />}>
+      <Button variant="outline" size="sm" render={<Link href="/reports" />}>
         <BarChart3 className="size-3.5" />
         Analytics
       </Button>

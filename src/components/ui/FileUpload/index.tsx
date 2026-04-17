@@ -1,7 +1,20 @@
 "use client";
 
-import { useRef, useState } from "react";
+import {
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { Upload, FileText, X } from "lucide-react";
+
+// FileUploadHandle lets callers reset the component after a successful
+// submit. Without this, /upload's "Initialize Ingest" flow left the staged
+// file list in place while the parent store had already cleared — operators
+// saw a stale "3 files selected" caption. Exposed via a ref prop (React 19).
+export interface FileUploadHandle {
+  clear: () => void;
+}
 
 interface FileUploadProps {
   label?: string;
@@ -11,6 +24,7 @@ interface FileUploadProps {
   value?: File[];
   onChange?: (files: File[]) => void;
   className?: string;
+  ref?: Ref<FileUploadHandle>;
 }
 
 export default function FileUpload({
@@ -21,10 +35,21 @@ export default function FileUpload({
   value = [],
   onChange,
   className = "",
+  ref,
 }: FileUploadProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>(value);
   const [isDragging, setIsDragging] = useState(false);
+
+  useImperativeHandle(ref, () => ({
+    clear: () => {
+      setFiles([]);
+      // <input type="file"> retains its value across re-renders; without
+      // this reset, re-picking the same file wouldn't fire onChange.
+      if (inputRef.current) inputRef.current.value = "";
+      onChange?.([]);
+    },
+  }));
 
   function handleFiles(incoming: FileList | null) {
     if (!incoming) return;

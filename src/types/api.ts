@@ -60,6 +60,13 @@ export interface DashboardSummary {
   pipeline_rows: PipelineRow[];
   pipeline_counts: PipelineCounts;
   pipeline_health_pct: number;
+  // Period-over-period deltas computed server-side against the equal-length
+  // window ending at the current window's start. Signed — negative means the
+  // metric dropped. These replace the old MOCK_DELTAS fallback on /home.
+  delta_active_projects: number;
+  delta_total_surveys: number;
+  delta_pending_surveys: number;
+  delta_pipeline_health_pct: number;
 }
 
 // --- Projects ---
@@ -140,6 +147,63 @@ export interface ReconciliationRecord {
   period_end: string;
   provenance: Record<string, unknown>;
   created_at: string;
+}
+
+// ReconciliationSummaryThresholds shows the green/amber band that classified
+// the rows in the current result set, plus whether the client has an override
+// or is inheriting the seeded __default__ row. The UI tags the thresholds
+// popover accordingly so operators know when they're editing vs. creating.
+export interface ReconciliationSummaryThresholds {
+  green_pct: number;
+  amber_pct: number;
+  source: "client" | "default";
+}
+
+// ReconciliationSummary replaces the client-side sum KPIs on /reconciliation.
+// Returned by GET /api/v1/analytics/reconciliation/summary?project_id=<id>.
+export interface ReconciliationSummary {
+  total_survey_t: number;
+  total_balance_t: number;
+  variance_pct: number;
+  flagged_count: number;
+  green_count: number;
+  amber_count: number;
+  red_count: number;
+  last_run: string | null;
+  thresholds: ReconciliationSummaryThresholds;
+}
+
+// AnalyticsThreshold mirrors asset-svc's dtos.ThresholdResponse. `source` is
+// "client" when the row's client_id matches the caller's, "default" when the
+// handler is serving the seeded __default__ row as a fallback.
+export interface AnalyticsThreshold {
+  id: string;
+  client_id: string;
+  metric_type: string;
+  green_upper_pct: number;
+  amber_upper_pct: number;
+  source: "client" | "default";
+  updated_at: string;
+}
+
+// RunReconciliationRequest — body shape for
+// POST /asset-svc/api/v1/projects/:projectId/reconciliation/run.
+// `material` is optional: when omitted the server fans out one reconciliation
+// per distinct material on the project.
+export interface RunReconciliationRequest {
+  period_start: string; // RFC3339
+  period_end: string; // RFC3339
+  material?: string;
+  swell_factor?: number;
+}
+
+export interface RunReconciliationResponse {
+  workflow_ids: string[];
+  materials: string[];
+  client_records_derived: number;
+  opening_stock_fell_back: boolean;
+  period_start: string;
+  period_end: string;
 }
 
 export interface TemporalSnapshot {

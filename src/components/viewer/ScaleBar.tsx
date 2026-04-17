@@ -5,7 +5,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { useViewerStore } from '../../store/viewerStore';
+import { useViewerStore } from '@/store/viewerStore';
 
 /** Round scale stops in metres. */
 const STOPS = [
@@ -50,11 +50,14 @@ export const ScaleBar: React.FC = () => {
 
   return (
     <div className="flex flex-col items-start gap-0.5">
-      <span className="text-[9px] font-mono text-zinc-500 dark:text-zinc-400 leading-none">
+      <span
+        className="text-[9px] font-mono uppercase tracking-[0.15em] text-text-muted leading-none"
+        style={{ fontVariantNumeric: 'tabular-nums' }}
+      >
         {label}
       </span>
       <div
-        className="h-1 bg-zinc-700 dark:bg-zinc-300 rounded-sm"
+        className="h-1 bg-accent/80 rounded-sm"
         style={{ width: `${widthPx}px` }}
       />
     </div>

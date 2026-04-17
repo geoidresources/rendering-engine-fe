@@ -5,7 +5,7 @@
 'use client';
 
 import React from 'react';
-import { useViewerStore } from '../../store/viewerStore';
+import { useViewerStore } from '@/store/viewerStore';
 
 interface CompassWidgetProps {
   onResetNorth: () => void;
@@ -23,7 +23,7 @@ export const CompassWidget: React.FC<CompassWidgetProps> = ({ onResetNorth }) =>
       onClick={onResetNorth}
       title="Reset to North"
       aria-label="Reset compass to north"
-      className="w-10 h-10 rounded-full bg-white/80 dark:bg-zinc-950/70 backdrop-blur-xl border border-zinc-200/70 dark:border-zinc-800/70 shadow-lg shadow-black/10 dark:shadow-black/30 grid place-items-center hover:bg-white dark:hover:bg-zinc-900 transition-colors"
+      className="w-10 h-10 rounded-full bg-bg-surface/90 supports-[backdrop-filter]:bg-bg-surface/75 backdrop-blur-md border border-border-subtle shadow-2xl grid place-items-center hover:border-accent/60 transition-colors"
     >
       <svg
         width="24"
@@ -32,16 +32,16 @@ export const CompassWidget: React.FC<CompassWidgetProps> = ({ onResetNorth }) =>
         fill="none"
         style={{ transform: `rotate(${rotationDeg}deg)`, transition: 'transform 0.15s ease-out' }}
       >
-        {/* North pointer (red) */}
-        <polygon points="12,2 14.5,12 12,10.5 9.5,12" fill="#ef4444" />
-        {/* South pointer (white/grey) */}
+        {/* North pointer (accent amber) */}
+        <polygon points="12,2 14.5,12 12,10.5 9.5,12" fill="var(--color-accent)" />
+        {/* South pointer (muted) */}
         <polygon
           points="12,22 14.5,12 12,13.5 9.5,12"
           fill="currentColor"
-          className="text-zinc-400 dark:text-zinc-500"
+          className="text-text-muted"
         />
         {/* Center dot */}
-        <circle cx="12" cy="12" r="1.5" fill="currentColor" className="text-zinc-600 dark:text-zinc-300" />
+        <circle cx="12" cy="12" r="1.5" fill="currentColor" className="text-text-secondary" />
         {/* N label */}
         <text
           x="12"
@@ -49,7 +49,7 @@ export const CompassWidget: React.FC<CompassWidgetProps> = ({ onResetNorth }) =>
           textAnchor="middle"
           fontSize="5"
           fontWeight="bold"
-          fill="#ef4444"
+          fill="var(--color-accent)"
           style={{ transform: `rotate(${-rotationDeg}deg)`, transformOrigin: '12px 12px' }}
         >
           N
