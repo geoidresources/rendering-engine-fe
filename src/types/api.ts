@@ -388,6 +388,26 @@ export interface UserRecord {
   created_at: string;
 }
 
+// CutFillRecord is one row returned by
+// GET /api/v1/analytics/cutfill?baseline=<uuid>&comparison=<uuid>.
+// Each row covers one zone; diff_raster_url points to an XYZ tile set of
+// the elevation-difference raster (null when the processor hasn't written
+// tiles yet or the comparison pair has no raster).
+export interface CutFillRecord {
+  id: string;
+  zone_id: string;
+  zone_name: string;
+  cut_volume_m3: number;
+  fill_volume_m3: number;
+  net_change_m3: number;
+  total_moved_m3: number;
+  cut_tonnage_t: number;
+  fill_tonnage_t: number;
+  diff_raster_url: string | null;
+  provenance: Record<string, unknown>;
+  created_at: string;
+}
+
 // --- QA ---
 
 export interface QAAuditLogEntry {

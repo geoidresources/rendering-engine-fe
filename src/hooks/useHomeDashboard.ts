@@ -51,6 +51,7 @@ import type {
   ListEnvelope,
   MaterialsResponse,
   ProcessingStatus,
+  ProjectMaterial,
   ReconciliationRecord,
   ReconciliationSummary,
   StockpileZone,
@@ -163,14 +164,20 @@ export function useHomeDashboard(options: UseHomeDashboardOptions = {}) {
   // envelope) — short tail, no pagination. The page lifts the currently
   // selected material into its own state and passes it back via the
   // `selectedMaterial` option.
-  const materials = useQuery<MaterialsResponse>({
+  //
+  // NOTE: queryFn unwraps to `ProjectMaterial[]` so the cache shape
+  // matches `useMaterials` (same queryKey). Earlier this hook cached the
+  // full `{materials: [...]}` envelope and the viewer's RightRail crashed
+  // with `materialsList.slice is not a function` whenever the home page
+  // had been visited first. Keep these two hooks shape-aligned.
+  const materials = useQuery<ProjectMaterial[]>({
     queryKey: ["analytics", "materials", latestProjectId],
     enabled: !!latestProjectId,
     queryFn: async () => {
       const res = await apiClient.get<MaterialsResponse>(
         `/api/v1/analytics/materials?project_id=${latestProjectId}`,
       );
-      return res.data;
+      return res.data?.materials ?? [];
     },
     staleTime: 5 * 60_000,
   });
@@ -181,7 +188,7 @@ export function useHomeDashboard(options: UseHomeDashboardOptions = {}) {
   // backend would reject as bad-request.
   const effectiveMaterial = useMemo(() => {
     if (selectedMaterial) return selectedMaterial;
-    return materials.data?.materials?.[0]?.material;
+    return materials.data?.[0]?.material;
   }, [selectedMaterial, materials.data]);
 
   // Derive the trend window from the caller's range (falls back to
@@ -283,9 +290,9 @@ export function useHomeDashboard(options: UseHomeDashboardOptions = {}) {
     if (
       process.env.NODE_ENV !== "production" &&
       selectedMaterial &&
-      materials.data?.materials &&
-      materials.data.materials.length > 0 &&
-      !materials.data.materials.some((m) => m.material === selectedMaterial)
+      materials.data &&
+      materials.data.length > 0 &&
+      !materials.data.some((m) => m.material === selectedMaterial)
     ) {
       console.warn(
         `[useHomeDashboard] selectedMaterial=${selectedMaterial} is not in the materials list for project ${latestProjectId}`,

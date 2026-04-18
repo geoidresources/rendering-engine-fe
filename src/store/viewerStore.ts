@@ -3,12 +3,33 @@ import { Manifest, Bounds } from '../types/manifest';
 import { apiClient } from '../lib/http';
 import type { Project } from '../types/api';
 
-export type LayerId = 'ortho' | 'dsm' | 'laz' | 'polygons' | 'site_model' | 'heatmap' | 'contours';
+export type LayerId =
+  | 'ortho'
+  | 'dsm'
+  | 'laz'
+  | 'polygons'
+  | 'site_model'
+  | 'heatmap'
+  | 'contours'
+  | 'annotations';
 export type TerrainMode = 'dtm' | 'dsm';
-export type ToolMode = 'select' | 'distance' | 'area' | 'volume';
+export type ToolMode =
+  | 'select'
+  | 'distance'
+  | 'area'
+  | 'volume'
+  | 'draw-polygon'
+  | 'profile'
+  | 'cross-section'
+  | 'annotate';
 export type BlendPreset = 'stacked' | 'embedded';
 export type RightRailTab = 'overview' | 'layers' | 'inspector' | 'measurements' | 'compare';
-export type RailRevealReason = 'selection' | 'compare-on' | 'measurement-saved' | 'layer-toggled';
+export type RailRevealReason =
+  | 'selection'
+  | 'compare-on'
+  | 'measurement-active'
+  | 'measurement-saved'
+  | 'layer-toggled';
 
 export interface MeasurementPoint {
   longitude: number;
@@ -135,6 +156,99 @@ export interface ViewerState {
   setRightRailTab: (tab: RightRailTab) => void;
   setRightRailCollapsed: (collapsed: boolean) => void;
   revealRailFor: (reason: RailRevealReason) => void;
+
+  // Region-drawing state — populated by the polygon draw handler when
+  // `activeTool === 'draw-polygon'`. Vertices are stored in WGS-84 so
+  // the save modal can serialise them straight into a GeoJSON Polygon
+  // without needing a Cesium Viewer reference.
+  drawing: DrawingState;
+  startDrawing: () => void;
+  pushDrawingVertex: (point: MeasurementPoint) => void;
+  setDrawingVertices: (points: MeasurementPoint[]) => void;
+  finalizeDrawing: () => void;
+  cancelDrawing: () => void;
+  closeDrawingModal: () => void;
+
+  // Elevation profile / cross-section — populated by `useProfileHandler`
+  // after the user finishes a polyline and we sample terrain at N evenly
+  // spaced points. The chart card mounts off `profile.samples != null`.
+  // `mode` distinguishes Profile (terrain-only) from Cross-section
+  // (terrain + vertical exaggeration slider).
+  profile: ProfileState;
+  setProfileSamples: (
+    samples: ProfileSample[] | null,
+    mode: 'profile' | 'cross-section',
+  ) => void;
+  setProfileExaggeration: (factor: number) => void;
+  clearProfile: () => void;
+
+  // Pin annotations — created via the Annotate tool. The handler captures
+  // a click, opens the modal seeded with `annotationDraft.point`, and on
+  // save the resulting `Annotation` is appended to `annotations` and
+  // synced into a dedicated Cesium datasource by `useAnnotationLayer`.
+  // Visibility is driven by `layers.annotations.visible` so the existing
+  // Layers tab toggle works without any per-feature wiring.
+  annotations: Annotation[];
+  annotationDraft: AnnotationDraft;
+  startAnnotationDraft: (point: MeasurementPoint) => void;
+  cancelAnnotationDraft: () => void;
+  addAnnotation: (text: string) => void;
+  removeAnnotation: (id: string) => void;
+}
+
+export interface DrawingState {
+  /** True while the user is placing vertices on the canvas. */
+  active: boolean;
+  /** Vertices placed so far (WGS-84). The DrawHandler keeps the Cesium
+   *  Cartesian3 list separately for live entity rendering. */
+  vertices: MeasurementPoint[];
+  /** Set true when the user finishes the polygon (right-click /
+   *  double-click). The viewer mounts the SaveRegionModal off this flag. */
+  modalOpen: boolean;
+}
+
+/**
+ * One terrain sample along the user-drawn profile polyline. `distance`
+ * is metres from the polyline start (cumulative along the great-circle
+ * route), `height` is metres above the WGS-84 ellipsoid (matches what
+ * Cesium's terrain provider returns).
+ */
+export interface ProfileSample {
+  distance: number;
+  height: number;
+}
+
+export interface ProfileState {
+  /** Null when the chart should not render. Non-null after the user
+   *  finishes a profile polyline and we've sampled the terrain. */
+  samples: ProfileSample[] | null;
+  /** Drives the chart's secondary controls — Cross-section mode shows
+   *  the vertical-exaggeration slider, Profile does not. */
+  mode: 'profile' | 'cross-section';
+  /** Vertical-exaggeration factor used by the chart's Y-axis domain.
+   *  1 = true scale; default for Cross-section is 3. */
+  exaggeration: number;
+}
+
+/**
+ * One persisted pin on the canvas. The point is stored in WGS-84 so the
+ * Cesium layer can rebuild entities deterministically across re-mounts
+ * and so we can serialise the list (eventual backend persistence — see
+ * Phase 5 in `quirky-munching-corbato.md`).
+ */
+export interface Annotation {
+  id: string;
+  text: string;
+  point: MeasurementPoint;
+  createdAt: string;
+}
+
+/**
+ * Transient state held while the AnnotationModal is open. `point` is
+ * captured at canvas-click time so the modal doesn't need a Cesium ref.
+ */
+export interface AnnotationDraft {
+  point: MeasurementPoint | null;
 }
 
 export type FlyToTarget = {
@@ -159,6 +273,10 @@ const initialLayers: Record<LayerId, LayerState> = {
   site_model: { id: 'site_model', name: 'Site Model (3D)', visible: true, opacity: 1, loading: false, error: null },
   heatmap: { id: 'heatmap', name: 'Cut/Fill Heatmap', visible: false, opacity: 0.7, loading: false, error: null },
   contours: { id: 'contours', name: 'Contour Lines', visible: false, opacity: 1, loading: false, error: null },
+  // Annotations are pin-only (billboards + labels), so opacity has no
+  // visual effect — the slider is left in for layout consistency with
+  // the other layer cards but the renderer ignores the value.
+  annotations: { id: 'annotations', name: 'Annotations', visible: true, opacity: 1, loading: false, error: null },
 };
 
 // Mine site centre: lon=152.414949, lat=-32.062341
@@ -327,11 +445,88 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setRightRailTab: (rightRailTab) => set({ rightRailTab, rightRailCollapsed: false }),
   setRightRailCollapsed: (rightRailCollapsed) => set({ rightRailCollapsed }),
   revealRailFor: (reason) => {
+    // 'measurement-active' routes to Inspector (live readout) rather than the
+    // 'Saved regions' tab — the latter only lists backend-persisted regions
+    // and would confuse the user mid-draw. 'measurement-saved' is the
+    // post-completion event that *does* belong in Saved regions.
     const tab: RightRailTab =
       reason === 'selection' ? 'inspector' :
       reason === 'compare-on' ? 'compare' :
+      reason === 'measurement-active' ? 'inspector' :
       reason === 'measurement-saved' ? 'measurements' :
       'layers';
     set({ rightRailTab: tab, rightRailCollapsed: false });
   },
+
+  drawing: { active: false, vertices: [], modalOpen: false },
+  startDrawing: () =>
+    set({ drawing: { active: true, vertices: [], modalOpen: false } }),
+  pushDrawingVertex: (point) =>
+    set((state) => ({
+      drawing: { ...state.drawing, vertices: [...state.drawing.vertices, point] },
+    })),
+  setDrawingVertices: (vertices) =>
+    set((state) => ({ drawing: { ...state.drawing, vertices } })),
+  finalizeDrawing: () =>
+    set((state) => {
+      // Need at least 3 vertices to form a polygon. Otherwise treat the
+      // attempt as a no-op so the user can keep adding points.
+      if (state.drawing.vertices.length < 3) return state;
+      return { drawing: { ...state.drawing, active: false, modalOpen: true } };
+    }),
+  cancelDrawing: () =>
+    set({ drawing: { active: false, vertices: [], modalOpen: false } }),
+  closeDrawingModal: () =>
+    set({ drawing: { active: false, vertices: [], modalOpen: false } }),
+
+  profile: { samples: null, mode: 'profile', exaggeration: 1 },
+  setProfileSamples: (samples, mode) =>
+    set({
+      profile: {
+        samples,
+        mode,
+        // Reset exaggeration on each new sampling — Cross-section starts
+        // at 3× (terrain features are usually subtle relative to the
+        // horizontal span), Profile starts at true scale.
+        exaggeration: mode === 'cross-section' ? 3 : 1,
+      },
+    }),
+  setProfileExaggeration: (exaggeration) =>
+    set((state) => ({ profile: { ...state.profile, exaggeration } })),
+  clearProfile: () =>
+    set({ profile: { samples: null, mode: 'profile', exaggeration: 1 } }),
+
+  annotations: [],
+  annotationDraft: { point: null },
+  startAnnotationDraft: (point) => set({ annotationDraft: { point } }),
+  cancelAnnotationDraft: () => set({ annotationDraft: { point: null } }),
+  addAnnotation: (text) =>
+    set((state) => {
+      const point = state.annotationDraft.point;
+      if (!point) return state;
+      const trimmed = text.trim();
+      if (!trimmed) return state;
+      const annotation: Annotation = {
+        id: makeAnnotationId(),
+        text: trimmed,
+        point,
+        createdAt: new Date().toISOString(),
+      };
+      return {
+        annotations: [...state.annotations, annotation],
+        annotationDraft: { point: null },
+      };
+    }),
+  removeAnnotation: (id) =>
+    set((state) => ({
+      annotations: state.annotations.filter((a) => a.id !== id),
+    })),
 }));
+
+/** Stable enough for client-side annotation IDs without a uuid dep. */
+function makeAnnotationId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `ann-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}

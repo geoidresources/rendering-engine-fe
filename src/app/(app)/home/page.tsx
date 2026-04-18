@@ -390,7 +390,7 @@ export default function HomePage() {
   const alertCount = s?.alert_count ?? 0;
 
   const trendPoints = trends.data ?? [];
-  const materialOptions = materials.data?.materials ?? [];
+  const materialOptions = materials.data ?? [];
 
   return (
     <TooltipProvider delay={200}>
@@ -1705,7 +1705,7 @@ function PipelineTableCard({
         <CardTitle id="pipeline-title">Survey pipeline</CardTitle>
         <CardDescription>Most recent ingests and their stage.</CardDescription>
         <CardAction>
-          <Button variant="ghost" size="sm" render={<Link href="/projects" />}>
+          <Button variant="ghost" size="sm" nativeButton={false} render={<Link href="/projects" />}>
             View all
             <ArrowUpRight className="size-3.5" />
           </Button>
@@ -1865,11 +1865,11 @@ function ShortcutRow() {
 
   return (
     <section aria-label="Shortcuts" className="flex flex-wrap gap-2">
-      <Button variant="outline" size="sm" render={<Link href="/reconciliation" />}>
+      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/reconciliation" />}>
         <Scale className="size-3.5" />
         Reconcile
       </Button>
-      <Button variant="outline" size="sm" render={<Link href="/surveys/upload" />}>
+      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/surveys/upload" />}>
         <Upload className="size-3.5" />
         Upload survey
       </Button>
@@ -1882,15 +1882,15 @@ function ShortcutRow() {
         <FileDown className="size-3.5" />
         {exporting ? "Exporting…" : "Export inventory"}
       </Button>
-      <Button variant="outline" size="sm" render={<Link href="/qa" />}>
+      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/qa" />}>
         <ShieldCheck className="size-3.5" />
         QA review
       </Button>
-      <Button variant="outline" size="sm" render={<Link href="/viewer-3d" />}>
+      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/viewer-3d" />}>
         <Box className="size-3.5" />
         3D viewer
       </Button>
-      <Button variant="outline" size="sm" render={<Link href="/reports" />}>
+      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/reports" />}>
         <BarChart3 className="size-3.5" />
         Analytics
       </Button>

@@ -5,16 +5,16 @@ import {
   Columns2,
   Hexagon,
   MousePointer2,
+  Mountain,
   Pencil,
   PenTool,
   Ruler,
   Square,
+  TrendingUp,
 } from 'lucide-react';
 import { useViewerStore, type ToolMode } from '@/store/viewerStore';
-import { useCompareStore } from '@/store/compareStore';
+import { useToolModeActions, type ModeId } from '@/hooks/useToolModeActions';
 import { cn } from '@/lib/utils';
-
-type ModeId = 'select' | 'measure' | 'draw' | 'compare' | 'annotate';
 
 interface ModeDef {
   id: ModeId;
@@ -35,15 +35,17 @@ interface MeasureSubmode {
 const MODES: ModeDef[] = [
   { id: 'select', label: 'Select', icon: MousePointer2, shortcut: 'V', enabled: true },
   { id: 'measure', label: 'Measure', icon: Ruler, shortcut: 'M', enabled: true },
-  { id: 'draw', label: 'Draw', icon: PenTool, shortcut: 'D', enabled: false, hint: 'Region drawing — coming in Phase 3' },
+  { id: 'draw', label: 'Draw', icon: PenTool, shortcut: 'D', enabled: true, hint: 'Draw a polygon region — saves as a stockpile' },
   { id: 'compare', label: 'Compare', icon: Columns2, shortcut: 'C', enabled: true },
-  { id: 'annotate', label: 'Annotate', icon: Pencil, shortcut: 'A', enabled: false, hint: 'Annotations — coming in Phase 5' },
+  { id: 'annotate', label: 'Annotate', icon: Pencil, shortcut: 'A', enabled: true, hint: 'Drop a labeled pin on the canvas' },
 ];
 
 const MEASURE_SUBMODES: MeasureSubmode[] = [
   { id: 'distance', label: 'Distance', icon: Ruler, shortcut: '1' },
   { id: 'area', label: 'Area', icon: Square, shortcut: '2' },
   { id: 'volume', label: 'Volume', icon: Hexagon, shortcut: '3' },
+  { id: 'profile', label: 'Profile', icon: TrendingUp, shortcut: '4' },
+  { id: 'cross-section', label: 'Section', icon: Mountain, shortcut: '5' },
 ];
 
 /**
@@ -65,18 +67,29 @@ const MEASURE_SUBMODES: MeasureSubmode[] = [
  * stay in sync without an effect.
  */
 export const ToolPalette: React.FC = () => {
+  // Mode routing lives in `useToolModeActions` so the keyboard hotkey
+  // hook (`useViewerHotkeys`) can reuse the exact same wiring without
+  // duplicating the if-ladder. ToolPalette is now a thin renderer over
+  // that hook — see plans/quirky-munching-corbato.md, Polish Addendum
+  // Phase 2 for the rationale.
   const activeTool = useViewerStore((s) => s.activeTool);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
-  const terrainMode = useViewerStore((s) => s.terrainMode);
-  const setTerrainMode = useViewerStore((s) => s.setTerrainMode);
-  const revealRailFor = useViewerStore((s) => s.revealRailFor);
 
-  const compareEnabled = useCompareStore((s) => s.enabled);
-  const toggleCompare = useCompareStore((s) => s.toggle);
+  const {
+    activateMode,
+    setMeasureSubmode,
+    measureActive,
+    drawActive,
+    annotateActive,
+    compareEnabled,
+  } = useToolModeActions();
 
-  const measureActive = activeTool === 'distance' || activeTool === 'area' || activeTool === 'volume';
+  const profileActive = activeTool === 'profile' || activeTool === 'cross-section';
 
   // Esc returns to Select. (Event listener — not setState in effect.)
+  // Kept here (not in `useViewerHotkeys`) on purpose: ToolPalette already
+  // owns "what does Esc do for tools" and registering this in two places
+  // would double-fire `setActiveTool('select')` per keypress.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
@@ -86,36 +99,44 @@ export const ToolPalette: React.FC = () => {
     return () => window.removeEventListener('keydown', onKey);
   }, [setActiveTool]);
 
-  const handleModeClick = (id: ModeId) => {
-    if (id === 'select') {
-      setActiveTool('select');
-      return;
-    }
-    if (id === 'measure') {
-      // Default to distance if no measure tool is active yet.
-      if (!measureActive) setActiveTool('distance');
-      return;
-    }
-    if (id === 'compare') {
-      toggleCompare();
-      revealRailFor('compare-on');
-    }
-    // Draw / Annotate are disabled in Phase 1; click is a no-op.
-  };
+  // Local thin wrapper kept for type-narrowed prop passing into the
+  // button below. All routing lives in `activateMode`.
+  const handleModeClick = (id: ModeId) => activateMode(id);
+
+  // Find the active hint (only one mode shows a hint at a time, by
+  // construction — Draw / Profile / Annotate are mutually exclusive
+  // since they all map to a single `activeTool`).
+  const activeHint = drawActive
+    ? { Icon: PenTool, text: 'Click vertices · double-click to finish · Esc to cancel' }
+    : profileActive
+      ? { Icon: TrendingUp, text: 'Click ≥2 points · double-click to sample · Esc to cancel' }
+      : annotateActive
+        ? { Icon: Pencil, text: 'Click to drop a pin · Esc to cancel' }
+        : null;
 
   return (
-    <div className="absolute top-4 left-4 z-20 flex items-start gap-2">
-      {/* Mode pills */}
+    // Single anchored container. `left-3 / top-3` hugs the corner more
+    // tightly than the old `left-4 / top-4` since the pill is now slim
+    // enough that the extra inset read as wasted space. Right-bound
+    // keeps it from sliding under the 360-px rail; the pill is now
+    // narrow enough that wrapping shouldn't trigger on any sane width.
+    <div className="absolute top-3 left-3 right-[376px] z-20 flex flex-col items-start gap-1.5">
+      {/* One unified pill: modes → optional submodes → terrain segment.
+          Glassy, fully rounded, hairline borders, soft tonal selection
+          — no accent fill on the top-level modes (it's noisy), no
+          shadow-2xl drop. */}
       <div
         role="toolbar"
         aria-label="Viewer tools"
-        className="inline-flex items-center gap-0.5 rounded-sm border border-border-subtle bg-bg-surface/85 backdrop-blur-md p-1 shadow-2xl supports-[backdrop-filter]:bg-bg-surface/65"
+        className="inline-flex items-center gap-0.5 rounded-full border border-white/[0.06] bg-bg-surface/55 px-1 py-1 shadow-lg shadow-black/20 backdrop-blur-2xl supports-[backdrop-filter]:bg-bg-surface/40"
       >
         {MODES.map(({ id, label, icon: Icon, shortcut, enabled, hint }) => {
           const isActive =
             (id === 'select' && activeTool === 'select' && !compareEnabled) ||
             (id === 'measure' && measureActive) ||
-            (id === 'compare' && compareEnabled);
+            (id === 'draw' && drawActive) ||
+            (id === 'compare' && compareEnabled) ||
+            (id === 'annotate' && annotateActive);
           return (
             <button
               key={id}
@@ -126,79 +147,80 @@ export const ToolPalette: React.FC = () => {
               aria-label={label}
               aria-pressed={isActive}
               className={cn(
-                'h-8 px-2.5 inline-flex items-center gap-1.5 rounded-sm text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
+                // Apple Control-Center pattern: tinted-accent background with
+                // accent-coloured icon. ~5–7:1 contrast for the icon, but the
+                // pill itself stays calm — no full amber slab on top-level
+                // verbs. (Submodes below use the loud fill on purpose.)
+                'inline-flex size-9 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
                 isActive
                   ? 'bg-accent/15 text-accent'
                   : enabled
-                    ? 'text-text-muted hover:text-text-primary hover:bg-bg-elevated'
-                    : 'text-text-muted/40 cursor-not-allowed',
+                    ? 'text-text-muted/80 hover:bg-text-primary/[0.06] hover:text-text-primary'
+                    : 'cursor-not-allowed text-text-muted/30',
               )}
             >
-              <Icon className="size-3.5" />
-              {label}
+              <Icon className="size-4" />
             </button>
           );
         })}
+
+        {/* Measure submodes slide in inline behind a hairline divider —
+            same surface, just a quiet step-down in importance. The
+            selected submode wears a slightly stronger fill so the user
+            can read the active sub-tool without scanning the chip below. */}
+        {measureActive && (
+          <>
+            <div className="mx-1 h-5 w-px bg-white/10" aria-hidden />
+            {MEASURE_SUBMODES.map(({ id, label, icon: Icon, shortcut }) => {
+              const active = activeTool === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setMeasureSubmode(id)}
+                  title={`${label} · ${shortcut}`}
+                  aria-label={label}
+                  aria-pressed={active}
+                  className={cn(
+                    // Submodes commit harder than top-level verbs — once the
+                    // user is *in* a measure tool, the active sub-tool needs
+                    // to be unmistakable. Matches Blend presets and Heatmap-
+                    // mode chips elsewhere on the canvas.
+                    'inline-flex size-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
+                    active
+                      ? 'bg-accent text-bg-base'
+                      : 'text-text-muted/70 hover:bg-text-primary/[0.06] hover:text-text-primary',
+                  )}
+                >
+                  <Icon className="size-3.5" />
+                </button>
+              );
+            })}
+          </>
+        )}
+
+        {/*
+         * DTM/DSM lived here originally, but it's a *layer setting*
+         * (which version of one terrain to render), not a verb. Moved
+         * into the LayersTab Terrain row alongside opacity. The toolbar
+         * now holds verbs only — Select / Measure / Draw / Compare /
+         * Annotate.
+         */}
       </div>
 
-      {/* Measure submodes — only when Measure is active */}
-      {measureActive && (
+      {/* Hint chip — only renders when a mode that needs guidance is
+          active. Sits below the pill in a quieter glass, sentence case,
+          no border, just enough contrast to read against the canvas. */}
+      {activeHint && (
         <div
-          role="toolbar"
-          aria-label="Measure submodes"
-          className="inline-flex items-center gap-0.5 rounded-sm border border-border-subtle bg-bg-surface/85 backdrop-blur-md p-1 shadow-2xl supports-[backdrop-filter]:bg-bg-surface/65"
+          role="status"
+          aria-live="polite"
+          className="ml-1 inline-flex items-center gap-2 rounded-full bg-bg-surface/45 px-3 py-1 text-[11px] font-normal text-text-muted shadow-sm shadow-black/10 backdrop-blur-xl supports-[backdrop-filter]:bg-bg-surface/30"
         >
-          {MEASURE_SUBMODES.map(({ id, label, icon: Icon, shortcut }) => {
-            const active = activeTool === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() => setActiveTool(id)}
-                title={`${label} · ${shortcut}`}
-                aria-label={label}
-                aria-pressed={active}
-                className={cn(
-                  'h-8 px-2.5 inline-flex items-center gap-1.5 rounded-sm text-[10px] uppercase tracking-wider font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
-                  active
-                    ? 'bg-accent text-[#111]'
-                    : 'text-text-muted hover:text-text-primary hover:bg-bg-elevated',
-                )}
-              >
-                <Icon className="size-3.5" />
-                {label}
-              </button>
-            );
-          })}
+          <activeHint.Icon className="size-3 text-text-muted/80" />
+          {activeHint.text}
         </div>
       )}
-
-      {/* Terrain mode (DTM/DSM) — always inline */}
-      <div
-        role="group"
-        aria-label="Terrain mode"
-        className="inline-flex items-center rounded-sm border border-border-subtle bg-bg-surface/85 backdrop-blur-md p-0.5 shadow-2xl supports-[backdrop-filter]:bg-bg-surface/65"
-      >
-        {(['dtm', 'dsm'] as const).map((m) => {
-          const active = terrainMode === m;
-          return (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setTerrainMode(m)}
-              title={m === 'dtm' ? 'Bare-earth terrain' : 'Surface terrain (incl. structures/vegetation)'}
-              className={cn(
-                'h-7 px-2 text-[10px] font-semibold uppercase tracking-[0.15em] rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
-                active
-                  ? 'bg-accent text-[#111]'
-                  : 'text-text-muted hover:text-text-primary',
-              )}
-            >
-              {m.toUpperCase()}
-            </button>
-          );
-        })}
-      </div>
     </div>
   );
 };

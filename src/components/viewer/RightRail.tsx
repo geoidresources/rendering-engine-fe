@@ -4,6 +4,7 @@ import React, { useMemo } from 'react';
 import {
   Activity,
   AlertTriangle,
+  ArrowDownUp,
   Columns2,
   Eye,
   EyeOff,
@@ -11,15 +12,22 @@ import {
   LayoutDashboard,
   Loader2,
   MapPinned,
+  MoveHorizontal,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
   Ruler,
   Square,
+  TrendingDown,
+  TrendingUp,
 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 
 import { useViewerStore, type LayerId, type RightRailTab } from '@/store/viewerStore';
+import { useCompareStore } from '@/store/compareStore';
+import { useCutFill } from '@/hooks/useCutFill';
+import { useMaterials } from '@/hooks/useMaterials';
+import { useMeasurementsList, useDeleteMeasurement } from '@/hooks/useMeasurementsCrud';
 import { apiClient, unwrapList } from '@/lib/http';
 import type { ListEnvelope } from '@/types/api';
 import StatusChip, { type StatusTone } from '@/components/ui/StatusChip';
@@ -46,7 +54,12 @@ const TABS: TabDef[] = [
   { id: 'overview', label: 'Overview', icon: LayoutDashboard, shortcut: '1' },
   { id: 'layers', label: 'Layers', icon: Layers3, shortcut: '2' },
   { id: 'inspector', label: 'Inspector', icon: MapPinned, shortcut: '3' },
-  { id: 'measurements', label: 'Measurements', icon: Ruler, shortcut: '4' },
+  // Labelled "Saved regions" — *not* "Measurements" — to defuse the
+  // collision with live measurement readouts. Live values live in the
+  // Inspector tab while drawing; this tab is the persistent server-side
+  // catalogue of finished regions/polygons. Icon stays `Ruler` since the
+  // tab still represents geometric features; revisit if it confuses.
+  { id: 'measurements', label: 'Saved regions', icon: Ruler, shortcut: '4' },
   { id: 'compare', label: 'Compare', icon: Columns2, shortcut: '5' },
 ];
 
@@ -143,7 +156,7 @@ export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId }) => 
             )}
             {tab === 'layers' && <LayersTab />}
             {tab === 'inspector' && <InspectorTab />}
-            {tab === 'measurements' && <MeasurementsTab />}
+            {tab === 'measurements' && <SavedRegionsTab projectId={projectId} />}
             {tab === 'compare' && <CompareTab />}
           </div>
         </div>
@@ -179,30 +192,70 @@ const OverviewTab: React.FC<{ surveyId?: string; projectId?: string }> = ({
   surveyId,
   projectId,
 }) => {
-  const { data: anomalies = [], isLoading: anomaliesLoading } = useQuery<AnomalyRow[]>({
-    queryKey: ['rail-anomalies', projectId],
-    enabled: !!projectId,
-    queryFn: async () => {
-      type TrendRow = {
-        material: string;
-        is_anomaly: boolean;
-        anomaly_severity: string;
-        anomaly_z_score: number;
-      };
-      const res = await apiClient.get<ListEnvelope<TrendRow>>(
-        `/api/v1/analytics/trends?project_id=${projectId}&material=`,
-      );
-      return unwrapList<TrendRow>(res.data)
+  // Anomaly chips are sourced from `/api/v1/analytics/trends`, which the
+  // backend strictly scopes to a single material per call (see
+  // `rendering-engine-be/internal/handlers/handlers.go:387` — empty
+  // `material` returns 400). We therefore fetch the project's recent
+  // material list, fan out one trends query per material, then aggregate.
+  // Capped to 5 because (a) the chip row only shows 5 chips and (b) the
+  // demo project has ~400 `auto_pile_X` "materials" that would otherwise
+  // detonate a request storm.
+  type TrendRow = {
+    material: string;
+    is_anomaly: boolean;
+    anomaly_severity: string;
+    anomaly_z_score: number;
+  };
+
+  const { data: materialsList, isLoading: materialsLoading } =
+    useMaterials(projectId);
+  // Defensive: `useMaterials` already coerces to an array, but the queryKey
+  // is shared with `useHomeDashboard`'s envelope-shaped cache, so a stale
+  // entry could still flow through here. Guard before `.slice` to keep this
+  // tab from crashing the whole rail.
+  const materialsToQuery = Array.isArray(materialsList)
+    ? materialsList.slice(0, 5).map((m) => m.material)
+    : [];
+
+  const { anomalies, isLoading: trendsLoading } = useQueries({
+    queries: materialsToQuery.map((material) => ({
+      queryKey: ['rail-anomalies', projectId, material] as const,
+      enabled: !!projectId && !!material,
+      queryFn: async () => {
+        const res = await apiClient.get<ListEnvelope<TrendRow>>(
+          `/api/v1/analytics/trends?project_id=${projectId}&material=${encodeURIComponent(material)}`,
+        );
+        return unwrapList<TrendRow>(res.data);
+      },
+    })),
+    // `combine` runs once per render with the latest result snapshots,
+    // so the returned object is stable across re-renders that don't
+    // touch any per-material query — avoids the useMemo-on-array-of-
+    // query-results gotcha (each result is a fresh object).
+    combine: (results) => {
+      const rows = results.flatMap((r) => r.data ?? []);
+      const sorted = rows
         .filter((t) => t.is_anomaly)
+        .sort(
+          (a, b) =>
+            Math.abs(b.anomaly_z_score ?? 0) -
+            Math.abs(a.anomaly_z_score ?? 0),
+        )
         .slice(0, 5)
-        .map((t, i) => ({
+        .map<AnomalyRow>((t, i) => ({
           id: `a-${i}`,
           material: t.material,
           severity: t.anomaly_severity ?? 'warning',
           message: `z = ${t.anomaly_z_score?.toFixed(2) ?? '—'}`,
         }));
+      return {
+        anomalies: sorted,
+        isLoading: results.some((r) => r.isLoading),
+      };
     },
   });
+
+  const anomaliesLoading = materialsLoading || trendsLoading;
 
   const { data: distrib = [], isLoading: distribLoading } = useQuery<DistribRow[]>({
     queryKey: ['rail-stockpiles', surveyId],
@@ -377,12 +430,18 @@ const LayersTab: React.FC = () => {
   const setLayerOpacity = useViewerStore((s) => s.setLayerOpacity);
   const blendPreset = useViewerStore((s) => s.blendPreset);
   const setBlendPreset = useViewerStore((s) => s.setBlendPreset);
+  // Terrain mode is a sub-setting of the Terrain layer — Cesium can only
+  // attach one terrain provider at a time, so DTM and DSM are mutually
+  // exclusive flavours of the same surface. Lives here (not on the
+  // toolbar) because it's a layer choice, not an action.
+  const terrainMode = useViewerStore((s) => s.terrainMode);
+  const setTerrainMode = useViewerStore((s) => s.setTerrainMode);
 
   return (
     <div className="px-3 py-3 space-y-3">
       <p className="text-[10px] uppercase tracking-[0.15em] text-text-muted leading-snug">
-        Toggles add ortho, points, vectors, and models. Use the toolbar (T) to
-        switch DTM/DSM terrain.
+        Toggle visibility and opacity per layer. Choose bare-earth (DTM) or
+        surface (DSM) for terrain.
       </p>
 
       <div className="rounded-sm border border-border-subtle bg-bg-base/60 p-3">
@@ -426,6 +485,7 @@ const LayersTab: React.FC = () => {
       {(Object.keys(layers) as LayerId[]).map((id) => {
         const layer = layers[id];
         const opacityLocked = !layer.visible;
+        const isTerrain = id === 'dsm';
         return (
           <div
             key={id}
@@ -445,6 +505,54 @@ const LayersTab: React.FC = () => {
                 {layer.visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}
               </button>
             </div>
+
+            {/* Terrain-only sub-control: DTM (bare earth) ↔ DSM (surface).
+                Mirrors the Blend segmented control above so the visual
+                language for "pick one of two" is consistent across the
+                tab. Disabled when the terrain layer itself is hidden —
+                no point picking a flavour of an invisible layer. */}
+            {isTerrain && (
+              <div
+                className={cn(
+                  'mb-2 flex items-center justify-between gap-3',
+                  opacityLocked && 'pointer-events-none opacity-55',
+                )}
+              >
+                <span className="text-[10px] uppercase tracking-[0.15em] text-text-muted">
+                  Mode
+                </span>
+                <div
+                  role="tablist"
+                  aria-label="Terrain mode"
+                  className="inline-flex rounded-sm border border-border-subtle bg-bg-surface p-0.5"
+                >
+                  {(['dtm', 'dsm'] as const).map((m) => {
+                    const active = terrainMode === m;
+                    return (
+                      <button
+                        key={m}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setTerrainMode(m)}
+                        title={
+                          m === 'dtm'
+                            ? 'Bare-earth terrain — analytics surface (volumes, cut/fill)'
+                            : 'Surface terrain — includes structures and vegetation'
+                        }
+                        className={
+                          active
+                            ? 'rounded-sm px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.15em] bg-accent text-[#111]'
+                            : 'rounded-sm px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.15em] text-text-muted hover:text-text-primary hover:bg-bg-elevated'
+                        }
+                      >
+                        {m === 'dtm' ? 'DTM' : 'DSM'}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {layer.error && (
               <p className="text-[11px] text-red-400 mb-2 leading-snug" role="alert">
@@ -678,27 +786,242 @@ const DetailCell: React.FC<{ label: string; value: string }> = ({ label, value }
   </div>
 );
 
-/* ───────────────────────── Measurements ───────────────────────── */
+/* ───────────────────────── Saved regions ───────────────────────── */
 
-const MeasurementsTab: React.FC = () => {
+// Tab content for the right rail's "Saved regions" tab. Reads the
+// backend-persisted measurement / drawn-region catalogue via
+// `useMeasurementsList` — these are durable, server-side features, not
+// the live in-progress canvas measurement which lives in viewerStore
+// and is rendered by InspectorTab + MeasurementLiveReadout.
+const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
+  const { data: rows = [], isLoading, error } = useMeasurementsList(projectId);
+  const flyTo = useViewerStore((s) => s.flyTo);
+  const deleteMutation = useDeleteMeasurement(projectId);
+
+  if (!projectId) {
+    return (
+      <EmptyStateNudge
+        icon={<Pencil className="size-8" />}
+        title="No project loaded"
+        hint="Open a survey first — drawn regions and saved measurements will appear here."
+      />
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="size-4 animate-spin text-text-muted" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-3 py-3 text-[11px] text-red-400">
+        Could not load saved regions: {error.message}
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    return (
+      <EmptyStateNudge
+        icon={<Pencil className="size-8" />}
+        title="No drawn regions yet"
+        hint="Press D to draw a polygon region — it will save as a stockpile feature on this project."
+      />
+    );
+  }
+
+  // Centroid of a GeoJSON Polygon ring — naïve average of coords.
+  const centroid = (row: { geojson?: Record<string, unknown> }): { lng: number; lat: number } | null => {
+    const geom = row.geojson as
+      | { type?: string; coordinates?: [number, number][][] }
+      | undefined;
+    if (!geom || geom.type !== 'Polygon' || !geom.coordinates?.[0]?.length) return null;
+    const ring = geom.coordinates[0];
+    const sum = ring.reduce(
+      (acc, [lng, lat]) => ({ lng: acc.lng + lng, lat: acc.lat + lat }),
+      { lng: 0, lat: 0 },
+    );
+    return { lng: sum.lng / ring.length, lat: sum.lat / ring.length };
+  };
+
   return (
-    <EmptyStateNudge
-      icon={<Pencil className="size-8" />}
-      title="No saved measurements yet"
-      hint="Press M to start measuring. Saved measurements and drawn regions will appear here."
-    />
+    <div className="px-2 py-2 space-y-1">
+      <p className="px-1 text-[9px] uppercase tracking-[0.15em] text-text-muted">
+        {rows.length} saved {rows.length === 1 ? 'region' : 'regions'}
+      </p>
+      {rows.map((row) => {
+        const c = centroid(row);
+        const material = (row.properties?.material as string | undefined) ?? row.feature_type;
+        return (
+          <div
+            key={row.id}
+            className="group rounded-sm border border-border-subtle bg-bg-elevated px-2.5 py-1.5 text-[11px] flex items-center justify-between gap-2 hover:border-accent/40 transition-colors"
+          >
+            <button
+              type="button"
+              className="flex-1 min-w-0 text-left"
+              onClick={() => {
+                if (c) flyTo({ lng: c.lng, lat: c.lat, height: 600, label: row.name });
+              }}
+            >
+              <p className="font-medium truncate">{row.name}</p>
+              <p className="text-[9px] uppercase tracking-[0.12em] text-text-muted">
+                {material}
+              </p>
+            </button>
+            <button
+              type="button"
+              aria-label={`Delete ${row.name}`}
+              onClick={() => deleteMutation.mutate(row.id)}
+              disabled={deleteMutation.isPending}
+              className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-[0.12em] text-red-400 hover:text-red-300 disabled:opacity-30"
+            >
+              Delete
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 };
 
 /* ───────────────────────── Compare ───────────────────────── */
 
 const CompareTab: React.FC = () => {
+  const enabled = useCompareStore((s) => s.enabled);
+  const epochA = useCompareStore((s) => s.epochA);
+  const epochB = useCompareStore((s) => s.epochB);
+  const mode = useCompareStore((s) => s.mode);
+  const setMode = useCompareStore((s) => s.setMode);
+  const setLayerVisibility = useViewerStore((s) => s.setLayerVisibility);
+  const availableSurveys = useViewerStore((s) => s.availableSurveys);
+
+  const { data: rows = [], isLoading, error } = useCutFill(epochA, epochB);
+
+  const totals = useMemo(() => {
+    const cut = rows.reduce((s, r) => s + (r.cut_volume_m3 ?? 0), 0);
+    const fill = rows.reduce((s, r) => s + (r.fill_volume_m3 ?? 0), 0);
+    return { cut, fill, net: fill - cut };
+  }, [rows]);
+
+  const labelA = availableSurveys.find((s) => s.id === epochA)?.label ?? epochA?.slice(0, 8) ?? '—';
+  const labelB = availableSurveys.find((s) => s.id === epochB)?.label ?? epochB?.slice(0, 8) ?? '—';
+
+  function fmtVol(v: number) {
+    const abs = Math.abs(v);
+    if (abs >= 1_000_000) return `${(v / 1_000_000).toFixed(2)} M m³`;
+    if (abs >= 10_000) return `${(v / 1_000).toFixed(1)} k m³`;
+    return `${v.toLocaleString(undefined, { maximumFractionDigits: 0 })} m³`;
+  }
+
+  const handleModeChange = (next: 'slider' | 'diff') => {
+    setMode(next);
+    setLayerVisibility('heatmap', next === 'diff');
+  };
+
+  if (!enabled) {
+    return (
+      <EmptyStateNudge
+        icon={<Activity className="size-8" />}
+        title="Compare epochs"
+        hint="Toggle Compare in the top bar (or press C) to load a baseline and a comparison survey."
+      />
+    );
+  }
+
   return (
-    <EmptyStateNudge
-      icon={<Activity className="size-8" />}
-      title="Compare epochs"
-      hint="Toggle Compare in the top bar (or press C) to load a baseline and a comparison survey."
-    />
+    <div className="px-3 py-3 space-y-3 text-[11px] text-text-primary">
+      {/* Epoch summary */}
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated px-3 py-2 space-y-1">
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.12em]">
+          <MoveHorizontal className="size-3 text-text-muted" />
+          <span className="text-text-muted">Comparing</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="truncate text-text-muted">{labelA}</span>
+          <span className="text-text-muted">→</span>
+          <span className="truncate font-medium">{labelB}</span>
+        </div>
+        {!epochA || !epochB ? (
+          <p className="text-[10px] text-amber-400 mt-1">
+            Select epochs in the dock below the canvas.
+          </p>
+        ) : null}
+      </div>
+
+      {/* KPI grid */}
+      {(epochA && epochB) && (
+        <div className="grid grid-cols-3 gap-1">
+          {[
+            { label: 'Cut', value: totals.cut, color: 'text-red-400', Icon: TrendingDown },
+            { label: 'Fill', value: totals.fill, color: 'text-blue-400', Icon: TrendingUp },
+            { label: 'Net', value: totals.net, color: totals.net >= 0 ? 'text-blue-400' : 'text-red-400', Icon: ArrowDownUp },
+          ].map(({ label, value, color, Icon }) => (
+            <div key={label} className="rounded-sm border border-border-subtle bg-bg-elevated p-2 flex flex-col items-center gap-0.5">
+              <div className="flex items-center gap-1">
+                <Icon className={cn('size-3', color)} />
+                <span className="text-[9px] uppercase tracking-[0.12em] text-text-muted">{label}</span>
+              </div>
+              {isLoading ? (
+                <Loader2 className="size-3 animate-spin text-text-muted" />
+              ) : (
+                <span className={cn('text-[12px] font-semibold tabular-nums', color)}>
+                  {fmtVol(value)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Error */}
+      {error && (
+        <p className="text-[11px] text-red-400 rounded-sm border border-red-400/30 bg-red-400/10 px-2 py-1.5">
+          Could not load cut/fill data.
+        </p>
+      )}
+
+      {/* Zone list */}
+      {(epochA && epochB && !isLoading && rows.length > 0) && (
+        <div className="space-y-0.5">
+          <p className="text-[9px] uppercase tracking-[0.15em] text-text-muted px-1">Zones</p>
+          {rows.slice().sort((a, b) => a.net_change_m3 - b.net_change_m3).map((row) => (
+            <div key={row.id} className="flex items-center gap-2 px-1 py-1 rounded-sm hover:bg-bg-elevated">
+              <span className={cn('size-1.5 rounded-full shrink-0', row.net_change_m3 < 0 ? 'bg-red-400' : 'bg-blue-400')} />
+              <span className="flex-1 min-w-0 truncate">{row.zone_name || row.zone_id}</span>
+              <span className={cn('text-[10px] font-mono tabular-nums shrink-0', row.net_change_m3 < 0 ? 'text-red-400' : 'text-blue-400')}>
+                {row.net_change_m3 >= 0 ? '+' : ''}{fmtVol(row.net_change_m3)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Mode toggle */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] uppercase tracking-[0.12em] text-text-muted mr-auto">View as</span>
+        <div role="group" className="inline-flex items-center rounded-sm border border-border-subtle p-0.5">
+          {(['slider', 'diff'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => handleModeChange(m)}
+              aria-pressed={mode === m}
+              className={cn(
+                'h-5 px-2 rounded-sm text-[9px] uppercase tracking-[0.12em] transition-colors',
+                mode === m ? 'bg-accent text-[#111]' : 'text-text-muted hover:text-text-primary',
+              )}
+            >
+              {m === 'slider' ? 'Slider' : 'Heatmap'}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 };
 

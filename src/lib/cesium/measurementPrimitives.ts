@@ -163,6 +163,79 @@ export async function computeVolumeFromTerrain(
   return vol;
 }
 
+/**
+ * Sample the active terrain provider along a polyline (waypoints in
+ * Cartesian3) at `count` evenly-spaced points by total geodesic
+ * distance. Returns `{ distance, height }[]` where `distance` is metres
+ * from the polyline start and `height` is metres above the WGS-84
+ * ellipsoid (whatever the current terrain provider returns).
+ *
+ * Falls back to scene.globe.getHeight() if the terrain provider does
+ * not expose tiles for sampleTerrainMostDetailed (e.g. the default
+ * EllipsoidTerrainProvider) — that gives the user *something* to look
+ * at on demo / no-terrain surveys, even if it's all zeros.
+ */
+export async function sampleTerrainAlongPolyline(
+  viewer: CesiumViewer,
+  waypoints: Cartesian3[],
+  count: number = 200,
+): Promise<{ distance: number; height: number }[]> {
+  if (waypoints.length < 2 || count < 2) return [];
+
+  // ── 1. Build the polyline as a sequence of Cartographic waypoints +
+  //       cumulative geodesic distance at each one. ─────────────────
+  const wpCarto = waypoints.map((p) => Cartographic.fromCartesian(p));
+  const segLen: number[] = [0];
+  let total = 0;
+  for (let i = 1; i < wpCarto.length; i++) {
+    const g = new EllipsoidGeodesic(wpCarto[i - 1], wpCarto[i]);
+    total += g.surfaceDistance ?? 0;
+    segLen.push(total);
+  }
+  if (total <= 0) return [];
+
+  // ── 2. Generate `count` sample positions evenly spaced by distance. ─
+  const samplesCarto: Cartographic[] = [];
+  const distances: number[] = [];
+  for (let k = 0; k < count; k++) {
+    const t = (k / (count - 1)) * total; // [0..total]
+    distances.push(t);
+    // Find segment that contains `t`
+    let seg = 1;
+    while (seg < segLen.length - 1 && segLen[seg] < t) seg++;
+    const segStart = segLen[seg - 1];
+    const segEnd = segLen[seg];
+    const segSpan = segEnd - segStart;
+    const local = segSpan > 0 ? (t - segStart) / segSpan : 0;
+    const g = new EllipsoidGeodesic(wpCarto[seg - 1], wpCarto[seg]);
+    const interp = g.interpolateUsingFraction(local);
+    samplesCarto.push(Cartographic.fromRadians(interp.longitude, interp.latitude));
+  }
+
+  // ── 3. Sample heights via the terrain provider. ─────────────────────
+  const tp = viewer.terrainProvider;
+  let heights: number[] = [];
+  if (tp && !(tp instanceof EllipsoidTerrainProvider)) {
+    try {
+      await sampleTerrainMostDetailed(tp, samplesCarto);
+      heights = samplesCarto.map((s) => s.height ?? 0);
+    } catch {
+      heights = [];
+    }
+  }
+
+  // Fallback: `scene.globe.getHeight()` reads whatever's currently
+  // streamed in. Not as accurate as sampleTerrainMostDetailed but works
+  // when the provider is the default ellipsoid (or the network fetch
+  // failed).
+  if (heights.length === 0) {
+    const globe = viewer.scene.globe;
+    heights = samplesCarto.map((s) => globe.getHeight(s) ?? 0);
+  }
+
+  return distances.map((distance, i) => ({ distance, height: heights[i] }));
+}
+
 /** Ray-casting point-in-polygon test (all values in radians). */
 function pointInPolygonRad(lon: number, lat: number, ring: Cartographic[]): boolean {
   let inside = false;

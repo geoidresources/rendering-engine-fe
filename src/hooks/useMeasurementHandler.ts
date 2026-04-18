@@ -48,8 +48,16 @@ export function useMeasurementHandler(
   useEffect(() => {
     const viewer = viewerRef.current;
 
-    // Tear down handler when switching away from measurement tools
-    if (!viewer || activeTool === 'select') {
+    // This hook owns ONLY the classical measurement tools (distance,
+    // area, volume). The polygon-draw tool, profile and cross-section
+    // each have their own dedicated handler; if we activated for those
+    // here we'd race for canvas events and `clearMeasurementEntities`
+    // would wipe the other handler's preview polyline.
+    const isClassicalMeasure =
+      activeTool === 'distance' ||
+      activeTool === 'area' ||
+      activeTool === 'volume';
+    if (!viewer || !isClassicalMeasure) {
       if (handlerRef.current) {
         handlerRef.current.destroy();
         handlerRef.current = null;

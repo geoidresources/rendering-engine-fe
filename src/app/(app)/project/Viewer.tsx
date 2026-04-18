@@ -44,6 +44,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useViewerStore } from '@/store/viewerStore';
 import { useSiteStore } from '@/store/siteStore';
 import { useMeasurementHandler } from '@/hooks/useMeasurementHandler';
+import { useDrawingHandler } from '@/hooks/useDrawingHandler';
+import { useProfileHandler } from '@/hooks/useProfileHandler';
+import { useAnnotationHandler } from '@/hooks/useAnnotationHandler';
+import { useAnnotationLayer } from '@/hooks/useAnnotationLayer';
+import { useViewerHotkeys } from '@/hooks/useViewerHotkeys';
+import { SaveRegionModal } from '@/components/viewer/SaveRegionModal';
+import { AnnotationModal } from '@/components/viewer/AnnotationModal';
+import { ProfileChart } from '@/components/viewer/ProfileChart';
 import { CompassWidget } from '@/components/viewer/CompassWidget';
 import { ZoomControls } from '@/components/viewer/ZoomControls';
 import { CoordinatesBar } from '@/components/viewer/CoordinatesBar';
@@ -52,6 +60,9 @@ import { HeatmapLegend } from '@/components/viewer/HeatmapLegend';
 import { TimelineBar } from '@/components/viewer/TimelineBar';
 import { RightRail } from '@/components/viewer/RightRail';
 import { ToolPalette } from '@/components/viewer/ToolPalette';
+import { MeasurementLiveReadout } from '@/components/viewer/MeasurementLiveReadout';
+import { CompareDock, CompareSliderOverlay } from '@/components/viewer/CompareDock';
+import { useCompareStore } from '@/store/compareStore';
 import { apiClient, unwrapList } from '@/lib/http';
 import { rewriteGcsUrl } from '@/lib/assetUrl';
 import type { ListEnvelope } from '@/types/api';
@@ -235,11 +246,33 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   // Subscribe to the flyTo bus separately to avoid triggering the big destructure re-render.
   const flyToTarget = useViewerStore((s) => s.flyToTarget);
 
+  // ── Compare store ─────────────────────────────────────────────────
+  const compareEnabled = useCompareStore((s) => s.enabled);
+  const compareMode = useCompareStore((s) => s.mode);
+  const splitPosition = useCompareStore((s) => s.splitPosition);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<CesiumViewer | null>(null);
 
   // Wire measurement tools (distance, area, volume) to Cesium drawing handlers
   useMeasurementHandler(viewerRef);
+  // Wire the polygon-region draw tool. Activates when activeTool === 'draw-polygon'.
+  useDrawingHandler(viewerRef);
+  // Wire the elevation-profile / cross-section sampler. Activates when
+  // activeTool === 'profile' || 'cross-section'; finishes by writing
+  // sampled terrain into viewerStore.profile and flipping back to Select.
+  useProfileHandler(viewerRef);
+  // Wire the Annotate tool. The handler captures a single canvas click
+  // into `annotationDraft` (which mounts AnnotationModal); the layer
+  // hook syncs the saved `annotations` array into a dedicated Cesium
+  // datasource and respects the Layers-tab visibility toggle.
+  useAnnotationHandler(viewerRef);
+  useAnnotationLayer(viewerRef);
+  // Global keyboard shortcuts — V/M/D/C/A for tool modes, 1–5 for
+  // measure submodes (when a measure tool is active) or right-rail
+  // tabs (otherwise). Single window-scoped listener; bails on input
+  // elements + modifier-bearing keystrokes. See `useViewerHotkeys`.
+  useViewerHotkeys();
 
   // ── ContextBar wiring ─────────────────────────────────────────────
   const router = useRouter();
@@ -1038,6 +1071,21 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     return () => { isSubscribed = false; };
   }, [contourUrl, layers.contours.visible, layers.contours.opacity, setLayerLoading, setLayerError]);
 
+  // ---- Compare: Cesium scene split position ----
+  // When the slider is active, drive viewer.scene.splitPosition from the store
+  // so the drag handle in CompareSliderOverlay is reflected on the GPU.
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer || viewer.isDestroyed()) return;
+    if (compareEnabled && compareMode === 'slider') {
+      viewer.scene.splitPosition = splitPosition;
+    } else {
+      // Reset to full-width (no split) when slider is off.
+      viewer.scene.splitPosition = 1;
+    }
+    viewer.scene.requestRender();
+  }, [compareEnabled, compareMode, splitPosition]);
+
   // ---- Interaction Picker ----
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -1157,6 +1205,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         {/* Tool palette — top-left, modes + DTM/DSM */}
         <ToolPalette />
 
+        {/* Live measurement readout — Cesium-projected chip that follows
+            the cursor (distance) or polygon centroid (area / volume)
+            while the user is drawing. Hides itself once the measurement
+            completes; the permanent Cesium label takes over from there. */}
+        <MeasurementLiveReadout viewerRef={viewerRef} />
+
         {/* Navigation controls — right side, sit above the rail */}
         <div className="absolute top-4 right-4 z-10 flex flex-col items-center gap-2">
           <CompassWidget onResetNorth={handleResetNorth} />
@@ -1168,8 +1222,18 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
           <ScaleBar />
         </div>
 
+        {/* Compare: drag-to-reveal slider overlay (renders above canvas, below UI chrome) */}
+        <CompareSliderOverlay />
+
+        {/* Compare: floating dock with epoch pickers, KPIs, zone list */}
+        <CompareDock />
+
         {/* Heatmap legend — bottom left */}
         <HeatmapLegend />
+
+        {/* Elevation profile / cross-section chart — bottom centre,
+            auto-mounts when profile.samples != null. */}
+        <ProfileChart />
 
         {/* Timeline bar — bottom center */}
         <TimelineBar />
@@ -1194,6 +1258,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
       {/* Right rail — adaptive: Overview / Layers / Inspector / Measurements / Compare */}
       <RightRail surveyId={surveyIdProp} projectId={resolvedProjectId ?? undefined} />
+
+      {/* Draw-region save modal — auto-mounts when the user finishes a polygon */}
+      <SaveRegionModal projectId={resolvedProjectId} surveyId={surveyIdProp} />
+
+      {/* Annotation modal — auto-mounts when the Annotate tool captures
+          a click and stores the position in `annotationDraft`. */}
+      <AnnotationModal />
     </div>
   );
 }
