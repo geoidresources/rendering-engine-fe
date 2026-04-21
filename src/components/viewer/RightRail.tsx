@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -17,11 +17,12 @@ import {
   PanelRightOpen,
   Pencil,
   Ruler,
-  Square,
+  Search,
   TrendingDown,
   TrendingUp,
 } from 'lucide-react';
 import { useQueries, useQuery } from '@tanstack/react-query';
+import type { Viewer as CesiumViewer } from 'cesium';
 
 import { useViewerStore, type LayerId, type RightRailTab } from '@/store/viewerStore';
 import { useCompareStore } from '@/store/compareStore';
@@ -33,6 +34,7 @@ import type { ListEnvelope } from '@/types/api';
 import StatusChip, { type StatusTone } from '@/components/ui/StatusChip';
 import { cn } from '@/lib/utils';
 import { EmptyStateNudge } from './EmptyStateNudge';
+import { MeasurementResultsCard } from './MeasurementResultsCard';
 
 const SITE_DISTRIBUTION_PALETTE = ['#F59E0B', '#FBBF24', '#FCD34D', '#A78BFA', '#60A5FA', '#FB7185'];
 
@@ -41,6 +43,12 @@ interface RightRailProps {
   surveyId?: string;
   /** Active project id — drives anomaly trends. */
   projectId?: string;
+  /** Live Cesium viewer ref. Threaded down so the InspectorTab's
+   *  `<MeasurementResultsCard />` can call `recomputeVolume(viewer, …)`
+   *  when the operator picks a different base plane — none of the
+   *  other tabs need it, but threading the ref keeps the data flow
+   *  explicit (instead of a global viewer registry). */
+  viewerRef?: React.RefObject<CesiumViewer | null>;
 }
 
 interface TabDef {
@@ -73,7 +81,7 @@ const TABS: TabDef[] = [
  * to a 36 px tab strip via `setRightRailCollapsed` so the canvas can
  * occupy the full viewport when needed.
  */
-export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId }) => {
+export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId, viewerRef }) => {
   const tab = useViewerStore((s) => s.rightRailTab);
   const collapsed = useViewerStore((s) => s.rightRailCollapsed);
   const setTab = useViewerStore((s) => s.setRightRailTab);
@@ -155,7 +163,9 @@ export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId }) => 
               <OverviewTab surveyId={surveyId} projectId={projectId} />
             )}
             {tab === 'layers' && <LayersTab />}
-            {tab === 'inspector' && <InspectorTab />}
+            {tab === 'inspector' && (
+              <InspectorTab projectId={projectId} viewerRef={viewerRef} />
+            )}
             {tab === 'measurements' && <SavedRegionsTab projectId={projectId} />}
             {tab === 'compare' && <CompareTab />}
           </div>
@@ -604,21 +614,34 @@ const LayersTab: React.FC = () => {
 
 /* ───────────────────────── Inspector ───────────────────────── */
 
-const InspectorTab: React.FC = () => {
+interface InspectorTabProps {
+  projectId?: string;
+  viewerRef?: React.RefObject<CesiumViewer | null>;
+}
+
+const InspectorTab: React.FC<InspectorTabProps> = ({ projectId, viewerRef }) => {
   const selectedFeature = useViewerStore((s) => s.selectedFeature);
   const selectedAreaDetails = useViewerStore((s) => s.selectedAreaDetails);
   const areaDetailsLoading = useViewerStore((s) => s.areaDetailsLoading);
   const activeTool = useViewerStore((s) => s.activeTool);
-  const measurement = useViewerStore((s) => s.measurement);
-  const setActiveTool = useViewerStore((s) => s.setActiveTool);
+  const profile = useViewerStore((s) => s.profile);
   const setSelectedFeature = useViewerStore((s) => s.setSelectedFeature);
   const setSelectedAreaDetails = useViewerStore((s) => s.setSelectedAreaDetails);
-  const clearMeasurement = useViewerStore((s) => s.clearMeasurement);
 
   const isMeasuring =
     activeTool === 'distance' || activeTool === 'area' || activeTool === 'volume';
+  // Profile/cross-section results live on the bottom dock but the card
+  // also surfaces a slope-KPI summary; we want the empty-state nudge to
+  // bow out as soon as either path is active.
+  const hasProfile = profile.samples !== null && profile.samples.length >= 2;
 
-  if (!isMeasuring && !selectedFeature && !selectedAreaDetails && !areaDetailsLoading) {
+  if (
+    !isMeasuring &&
+    !hasProfile &&
+    !selectedFeature &&
+    !selectedAreaDetails &&
+    !areaDetailsLoading
+  ) {
     return (
       <EmptyStateNudge
         icon={<MapPinned className="size-8" />}
@@ -628,74 +651,23 @@ const InspectorTab: React.FC = () => {
     );
   }
 
+  // Build a no-op viewerRef for the rare case the parent didn't pass one
+  // (e.g. unit/storybook mounts). The card guards `viewer.current ===
+  // null`, so a stable null-ref is enough — `recomputeVolume` simply
+  // bails when the viewer isn't there.
+  const safeViewerRef =
+    viewerRef ?? ({ current: null } as React.RefObject<CesiumViewer | null>);
+
   return (
     <div
       className="px-3 py-3 space-y-3 text-[11px] text-text-primary"
       style={{ fontVariantNumeric: 'tabular-nums' }}
     >
-      {isMeasuring && (
-        <div className="rounded-sm border border-accent/30 bg-accent/10 p-3 leading-snug">
-          <div className="mb-2 flex items-center gap-2">
-            {activeTool === 'distance' ? (
-              <Ruler className="h-4 w-4 text-accent" />
-            ) : activeTool === 'area' ? (
-              <Square className="h-4 w-4 text-accent" />
-            ) : (
-              <MapPinned className="h-4 w-4 text-accent" />
-            )}
-            <span className="font-semibold uppercase tracking-[0.15em] text-[10px]">
-              {activeTool === 'distance' ? 'Distance' : activeTool === 'area' ? 'Area' : 'Volume'}{' '}
-              tool
-            </span>
-          </div>
-          {activeTool === 'distance' && (
-            <>
-              <p className="text-text-muted">
-                Click to place points. Double-click or right-click to finish.
-              </p>
-              <p className="mt-2">
-                Distance: <strong>{formatDistance(measurement.distanceMeters)}</strong>
-              </p>
-            </>
-          )}
-          {activeTool === 'area' && (
-            <>
-              <p className="text-text-muted">
-                Click to add polygon vertices. Right-click to close and measure.
-              </p>
-              <p className="mt-2">
-                Area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
-              </p>
-            </>
-          )}
-          {activeTool === 'volume' && (
-            <>
-              <p className="text-text-muted">
-                Draw a polygon around a stockpile. Right-click to close and compute volume.
-              </p>
-              <p className="mt-2">
-                Area: <strong>{formatArea(measurement.areaSquareMeters)}</strong>
-              </p>
-              {measurement.volumeCubicMeters !== undefined && (
-                <p className="mt-1">
-                  Volume: <strong>{formatVolume(measurement.volumeCubicMeters)}</strong>
-                </p>
-              )}
-            </>
-          )}
-          {measurement.status !== 'idle' && (
-            <button
-              type="button"
-              onClick={() => {
-                clearMeasurement();
-                setActiveTool('select');
-              }}
-              className="mt-2 inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.15em] text-accent hover:text-accent-hover transition-colors"
-            >
-              Clear measurement
-            </button>
-          )}
-        </div>
+      {(isMeasuring || hasProfile) && (
+        <MeasurementResultsCard
+          projectId={projectId ?? null}
+          viewerRef={safeViewerRef}
+        />
       )}
 
       {selectedFeature && (
@@ -757,11 +729,7 @@ const InspectorTab: React.FC = () => {
         </div>
       )}
 
-      {selectedFeature && (
-        <pre className="whitespace-pre-wrap break-all rounded-sm border border-border-subtle bg-bg-base/70 p-3 font-mono text-[10px] text-text-secondary">
-          {JSON.stringify(selectedFeature, null, 2)}
-        </pre>
-      )}
+      {selectedFeature && <FeaturePropertiesTable feature={selectedFeature} />}
 
       {(selectedFeature || selectedAreaDetails) && (
         <button
@@ -786,6 +754,69 @@ const DetailCell: React.FC<{ label: string; value: string }> = ({ label, value }
   </div>
 );
 
+/* Pretty-printed property table for the Inspector — replaces the raw
+ * JSON dump. Skips noisy internal keys (prefixed with `_`), formats
+ * numbers with tabular-nums, and renders nested objects as nested
+ * key/value blocks one level deep before falling back to JSON for the
+ * rare deeply-nested case. */
+const FeaturePropertiesTable: React.FC<{ feature: Record<string, unknown> }> = ({ feature }) => {
+  const rows = useMemo(() => {
+    return Object.entries(feature)
+      .filter(([k]) => !k.startsWith('_') && k !== 'id' && k !== 'name')
+      .sort(([a], [b]) => a.localeCompare(b));
+  }, [feature]);
+
+  if (rows.length === 0) {
+    return (
+      <p className="text-[11px] text-text-muted italic">
+        No additional properties on this feature.
+      </p>
+    );
+  }
+
+  return (
+    <div className="rounded-sm border border-border-subtle bg-bg-base/60 overflow-hidden">
+      <div className="px-2.5 py-1.5 border-b border-border-subtle bg-bg-elevated/40">
+        <p className="text-[9px] uppercase tracking-[0.2em] text-text-muted">
+          Properties
+        </p>
+      </div>
+      <dl className="divide-y divide-border-subtle">
+        {rows.map(([key, val]) => (
+          <div key={key} className="grid grid-cols-[100px_1fr] gap-2 px-2.5 py-1.5">
+            <dt className="text-[10px] uppercase tracking-[0.1em] text-text-muted truncate" title={key}>
+              {key}
+            </dt>
+            <dd
+              className="text-[11px] font-mono text-text-primary break-words"
+              style={{ fontVariantNumeric: 'tabular-nums' }}
+            >
+              {formatPropertyValue(val)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+};
+
+function formatPropertyValue(val: unknown): string {
+  if (val === null || val === undefined) return '—';
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) return String(val);
+    return Math.abs(val) >= 1000 || Number.isInteger(val)
+      ? val.toLocaleString()
+      : val.toFixed(3);
+  }
+  if (typeof val === 'boolean') return val ? 'true' : 'false';
+  if (typeof val === 'string') return val;
+  try {
+    return JSON.stringify(val);
+  } catch {
+    return String(val);
+  }
+}
+
 /* ───────────────────────── Saved regions ───────────────────────── */
 
 // Tab content for the right rail's "Saved regions" tab. Reads the
@@ -793,10 +824,14 @@ const DetailCell: React.FC<{ label: string; value: string }> = ({ label, value }
 // `useMeasurementsList` — these are durable, server-side features, not
 // the live in-progress canvas measurement which lives in viewerStore
 // and is rendered by InspectorTab + MeasurementLiveReadout.
+type SavedRegionsSortKey = 'recent' | 'name' | 'material';
+
 const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
   const { data: rows = [], isLoading, error } = useMeasurementsList(projectId);
   const flyTo = useViewerStore((s) => s.flyTo);
   const deleteMutation = useDeleteMeasurement(projectId);
+  const [query, setQuery] = useState('');
+  const [sortKey, setSortKey] = useState<SavedRegionsSortKey>('recent');
 
   if (!projectId) {
     return (
@@ -848,12 +883,74 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
     return { lng: sum.lng / ring.length, lat: sum.lat / ring.length };
   };
 
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? rows.filter((r) => {
+        const material = String(r.properties?.material ?? r.feature_type ?? '');
+        return (
+          r.name.toLowerCase().includes(q) ||
+          material.toLowerCase().includes(q)
+        );
+      })
+    : rows;
+
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortKey === 'name') return a.name.localeCompare(b.name);
+    if (sortKey === 'material') {
+      const ma = String(a.properties?.material ?? a.feature_type ?? '');
+      const mb = String(b.properties?.material ?? b.feature_type ?? '');
+      return ma.localeCompare(mb);
+    }
+    // recent: newest first by created_at (ISO strings sort lexicographically)
+    return (b.created_at ?? '').localeCompare(a.created_at ?? '');
+  });
+
   return (
     <div className="px-2 py-2 space-y-1">
-      <p className="px-1 text-[9px] uppercase tracking-[0.15em] text-text-muted">
-        {rows.length} saved {rows.length === 1 ? 'region' : 'regions'}
-      </p>
-      {rows.map((row) => {
+      <div className="px-1 pb-1 space-y-1.5">
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 size-3 text-text-muted" />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search regions…"
+            aria-label="Search saved regions"
+            className="w-full rounded-sm border border-border-subtle bg-bg-elevated pl-7 pr-2 py-1 text-[11px] text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent/60"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[9px] uppercase tracking-[0.15em] text-text-muted">
+            {sorted.length} of {rows.length}
+          </span>
+          <div role="group" aria-label="Sort regions" className="inline-flex items-center rounded-sm border border-border-subtle p-0.5">
+            {([
+              { id: 'recent', label: 'Recent' },
+              { id: 'name', label: 'A–Z' },
+              { id: 'material', label: 'Material' },
+            ] as { id: SavedRegionsSortKey; label: string }[]).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setSortKey(opt.id)}
+                aria-pressed={sortKey === opt.id}
+                className={cn(
+                  'h-5 px-1.5 rounded-sm text-[9px] uppercase tracking-[0.12em] transition-colors',
+                  sortKey === opt.id ? 'bg-accent/15 text-accent' : 'text-text-muted hover:text-text-primary',
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+      {sorted.length === 0 && (
+        <p className="px-2 py-3 text-[11px] text-text-muted text-center">
+          No regions match “{query}”.
+        </p>
+      )}
+      {sorted.map((row) => {
         const c = centroid(row);
         const material = (row.properties?.material as string | undefined) ?? row.feature_type;
         return (
@@ -1041,7 +1138,3 @@ function formatArea(areaSquareMeters?: number): string {
     : `${areaSquareMeters.toFixed(0)} m²`;
 }
 
-function formatVolume(volumeCubicMeters?: number): string {
-  if (!volumeCubicMeters || volumeCubicMeters <= 0) return '0 m³';
-  return `${volumeCubicMeters.toLocaleString(undefined, { maximumFractionDigits: 0 })} m³`;
-}

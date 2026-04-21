@@ -6,16 +6,21 @@
 
 import React from 'react';
 import { useViewerStore } from '@/store/viewerStore';
+import { useCompareStore } from '@/store/compareStore';
 
 export const TimelineBar: React.FC = () => {
   const surveys = useViewerStore((s) => s.availableSurveys);
   const activeSurveyId = useViewerStore((s) => s.activeSurveyId);
   const switchSurvey = useViewerStore((s) => s.switchSurvey);
+  // CompareDock takes the bottom-center spot when compare is on, and
+  // pinning a single epoch on the timeline contradicts the A→B framing —
+  // so hide the timeline while comparing.
+  const compareEnabled = useCompareStore((s) => s.enabled);
 
-  if (surveys.length < 2) return null;
+  if (surveys.length < 2 || compareEnabled) return null;
 
   return (
-    <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-sm bg-bg-surface/90 supports-[backdrop-filter]:bg-bg-surface/75 backdrop-blur-md border border-border-subtle shadow-2xl px-4 py-2">
+    <div className="absolute bottom-9 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 rounded-sm bg-bg-surface/90 supports-[backdrop-filter]:bg-bg-surface/75 backdrop-blur-md border border-border-subtle shadow-2xl px-4 py-2">
       {/* Connecting line */}
       <div className="absolute top-1/2 left-6 right-6 h-px bg-border-subtle -translate-y-px" />
 

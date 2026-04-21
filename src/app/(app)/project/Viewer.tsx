@@ -51,6 +51,7 @@ import { useAnnotationLayer } from '@/hooks/useAnnotationLayer';
 import { useViewerHotkeys } from '@/hooks/useViewerHotkeys';
 import { SaveRegionModal } from '@/components/viewer/SaveRegionModal';
 import { AnnotationModal } from '@/components/viewer/AnnotationModal';
+import { KeyboardShortcutsOverlay } from '@/components/viewer/KeyboardShortcutsOverlay';
 import { ProfileChart } from '@/components/viewer/ProfileChart';
 import { CompassWidget } from '@/components/viewer/CompassWidget';
 import { ZoomControls } from '@/components/viewer/ZoomControls';
@@ -429,9 +430,18 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
 
-    // Hide standard credit display elements to clean up DOM 
+    // Detached credit container — Cesium / CartoDB / Ion all require
+    // visible attribution per their licenses. Mount inside the canvas
+    // wrapper, anchor bottom-right above CoordinatesBar, style as a
+    // muted glass chip so it reads as system chrome rather than UI.
     const creditContainer = document.createElement('div');
-    creditContainer.style.display = 'none';
+    creditContainer.className =
+      'pointer-events-auto absolute bottom-9 right-3 z-10 ' +
+      'rounded-sm border border-border-subtle bg-bg-surface/70 ' +
+      'supports-[backdrop-filter]:bg-bg-surface/50 backdrop-blur-md ' +
+      'px-2 py-0.5 text-[9px] font-mono text-text-muted ' +
+      '[&_a]:text-text-muted [&_a]:hover:text-text-primary';
+    containerRef.current.appendChild(creditContainer);
 
     const viewer = new CesiumViewer(containerRef.current, {
       geocoder: false,
@@ -497,6 +507,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       document.removeEventListener('visibilitychange', visibilityHandler);
       canvas.removeEventListener('webglcontextlost', ctxLossHandler);
       viewer.destroy();
+      creditContainer.remove();
       viewerRef.current = null;
     };
   }, []);
@@ -1241,23 +1252,34 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         {/* Coordinates bar — bottom */}
         <CoordinatesBar />
 
-        {/* Global loading overlay */}
+        {/* Loading chip — non-blocking; sits top-center between the tool
+            palette and the navigation cluster so the canvas stays visible
+            and interactive while assets stream in. */}
         {showLoader && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-bg-base/70 backdrop-blur-sm pointer-events-none">
-            <div className="flex flex-col items-center gap-4 p-6 rounded-xl bg-bg-surface border border-border-subtle shadow-2xl">
-              <div className="w-10 h-10 border-3 border-accent border-t-transparent rounded-full animate-spin" />
-              <div className="flex flex-col items-center gap-1.5">
-                {activeLoads.map((msg) => (
-                  <span key={msg} className="text-[10px] font-mono uppercase tracking-[0.2em] text-text-muted">{msg}</span>
-                ))}
-              </div>
+          <div
+            role="status"
+            aria-live="polite"
+            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
+          >
+            <div className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-bg-surface/85 px-3 py-1 shadow-md backdrop-blur-md supports-[backdrop-filter]:bg-bg-surface/65">
+              <div className="size-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+              <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-muted">
+                {activeLoads[0] ?? 'Loading'}
+                {activeLoads.length > 1 && (
+                  <span className="ml-1 text-text-muted/60">+{activeLoads.length - 1}</span>
+                )}
+              </span>
             </div>
           </div>
         )}
       </div>
 
       {/* Right rail — adaptive: Overview / Layers / Inspector / Measurements / Compare */}
-      <RightRail surveyId={surveyIdProp} projectId={resolvedProjectId ?? undefined} />
+      <RightRail
+        surveyId={surveyIdProp}
+        projectId={resolvedProjectId ?? undefined}
+        viewerRef={viewerRef}
+      />
 
       {/* Draw-region save modal — auto-mounts when the user finishes a polygon */}
       <SaveRegionModal projectId={resolvedProjectId} surveyId={surveyIdProp} />
@@ -1265,6 +1287,9 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       {/* Annotation modal — auto-mounts when the Annotate tool captures
           a click and stores the position in `annotationDraft`. */}
       <AnnotationModal />
+
+      {/* Keyboard shortcut cheat sheet — toggled by `?` */}
+      <KeyboardShortcutsOverlay />
     </div>
   );
 }

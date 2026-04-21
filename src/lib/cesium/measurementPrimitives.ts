@@ -95,16 +95,71 @@ export function computeAreaSquareMeters(points: Cartesian3[]): number {
 }
 
 /**
- * Approximate volume of material within a polygon above the average boundary elevation.
- * Samples the current terrain provider on a 25x25 grid and sums |height - base| * cellArea.
+ * Choices for the synthetic base plane used by `computeVolumeFromTerrain`.
+ *
+ * - `'avg'` (default, preserves the historical behaviour) — flat plane at
+ *   the mean of the boundary vertex heights. Best for roughly horizontal
+ *   stockpile pads.
+ * - `'min'` — flat plane at the lowest vertex. Conservative; tends to
+ *   over-state fill (everything counts as material).
+ * - `'max'` — flat plane at the highest vertex. The opposite — under-states
+ *   fill, over-states cut. Useful when the operator drew the polygon
+ *   along a ridge.
+ * - `'fitted'` — least-squares plane through the boundary vertices,
+ *   evaluated at every sample's lng/lat. Best for tilted terrain
+ *   (benches, road shoulders) where a flat base would bias the answer.
+ *
+ * The card lets the user toggle this; `'avg'` is the default so existing
+ * call sites (and the live chip's single number) keep matching the
+ * pre-Polish-Phase-4 numbers.
+ */
+export type VolumeBasePlane = 'avg' | 'min' | 'max' | 'fitted';
+
+export interface VolumeResult {
+  /** Material above the base plane (m³). For a stockpile this is the
+   *  "real" volume — the part that physically sits on the ground. */
+  fillVol: number;
+  /** Material below the base plane (m³). For a clean stockpile this
+   *  should be ~0; non-zero values mean the polygon footprint includes
+   *  depressions/pits. The card surfaces this as a confidence warning. */
+  cutVol: number;
+  /** `fillVol - cutVol`. The number we hand to the live chip + the
+   *  Inspector headline. Matches the historical `computeVolumeFromTerrain`
+   *  return value when `cutVol === 0` (the typical stockpile case). */
+  netVol: number;
+  /** Number of interior grid points the terrain was sampled at. Drives
+   *  the card's confidence chip (≥200 high, 50–200 medium, <50 low). */
+  sampleCount: number;
+  /** Base plane elevation actually used (metres a.s.l.). For
+   *  `'fitted'` this is the plane elevation at the polygon centroid —
+   *  reported back so the card can show one number, not a 3-coefficient
+   *  fit equation that no operator would read. */
+  baseElevation: number;
+}
+
+/**
+ * Approximate volume of material within a polygon, split into above-base
+ * (fill) and below-base (cut) components. Samples the current terrain
+ * provider on a 25×25 grid; the historical implementation summed the
+ * absolute deviation, conflating cut and fill — the Measurement Results
+ * Card needs the signed split per PRD Stage 20 (Cut-Fill Analysis).
  */
 export async function computeVolumeFromTerrain(
   viewer: CesiumViewer,
   vertices: Cartesian3[],
-): Promise<number> {
+  opts: { basePlane?: VolumeBasePlane } = {},
+): Promise<VolumeResult> {
+  const empty: VolumeResult = {
+    fillVol: 0,
+    cutVol: 0,
+    netVol: 0,
+    sampleCount: 0,
+    baseElevation: 0,
+  };
+
   const tp = viewer.terrainProvider;
-  if (!tp || tp instanceof EllipsoidTerrainProvider) return 0;
-  if (vertices.length < 3) return 0;
+  if (!tp || tp instanceof EllipsoidTerrainProvider) return empty;
+  if (vertices.length < 3) return empty;
 
   const cartos = vertices.map((v) => Cartographic.fromCartesian(v));
 
@@ -120,31 +175,61 @@ export async function computeVolumeFromTerrain(
     if (c.latitude > maxLat) maxLat = c.latitude;
   }
 
-  // Base height = average boundary height
-  const baseHeight = cartos.reduce((s, c) => s + (c.height || 0), 0) / cartos.length;
+  const basePlane: VolumeBasePlane = opts.basePlane ?? 'avg';
+
+  // Pre-compute the base plane. For `'fitted'` we solve a 3-coeff
+  // least-squares fit `z = a·lon + b·lat + c` over the boundary vertices
+  // — when there are <3 vertices we'd already have returned above.
+  let baseAtSample: (lon: number, lat: number) => number;
+  let baseElevationAtCentroid: number;
+  if (basePlane === 'fitted') {
+    const fit = fitPlaneRad(cartos);
+    baseAtSample = (lon, lat) => fit.a * lon + fit.b * lat + fit.c;
+    baseElevationAtCentroid = baseAtSample(
+      (minLon + maxLon) / 2,
+      (minLat + maxLat) / 2,
+    );
+  } else {
+    let baseHeight: number;
+    if (basePlane === 'min') {
+      baseHeight = cartos.reduce((m, c) => Math.min(m, c.height ?? 0), Infinity);
+    } else if (basePlane === 'max') {
+      baseHeight = cartos.reduce((m, c) => Math.max(m, c.height ?? 0), -Infinity);
+    } else {
+      // 'avg' — historical default
+      baseHeight =
+        cartos.reduce((s, c) => s + (c.height || 0), 0) / cartos.length;
+    }
+    baseAtSample = () => baseHeight;
+    baseElevationAtCentroid = baseHeight;
+  }
 
   const N = 25;
   const dLon = (maxLon - minLon) / N;
   const dLat = (maxLat - minLat) / N;
-  if (dLon <= 0 || dLat <= 0) return 0;
+  if (dLon <= 0 || dLat <= 0) return empty;
 
-  // Build sample grid — only points inside polygon
+  // Build sample grid — only points inside polygon. We carry the
+  // per-sample base height alongside (matters for `'fitted'` mode where
+  // each sample sees a different base elevation).
   const samples: Cartographic[] = [];
+  const baseHeights: number[] = [];
   for (let i = 0; i <= N; i++) {
     for (let j = 0; j <= N; j++) {
       const lon = minLon + i * dLon;
       const lat = minLat + j * dLat;
       if (pointInPolygonRad(lon, lat, cartos)) {
         samples.push(Cartographic.fromRadians(lon, lat));
+        baseHeights.push(baseAtSample(lon, lat));
       }
     }
   }
-  if (samples.length === 0) return 0;
+  if (samples.length === 0) return empty;
 
   try {
     await sampleTerrainMostDetailed(tp, samples);
   } catch {
-    return 0;
+    return empty;
   }
 
   // Cell area in m² (approximate for small regions)
@@ -154,13 +239,135 @@ export async function computeVolumeFromTerrain(
   const cellH = dLat * R;
   const cellArea = cellW * cellH;
 
-  let vol = 0;
-  for (const s of samples) {
-    if (s.height !== undefined) {
-      vol += Math.abs(s.height - baseHeight) * cellArea;
-    }
+  let fillVol = 0; // terrain above base — typical stockpile material
+  let cutVol = 0; // terrain below base — depressions inside footprint
+  for (let i = 0; i < samples.length; i++) {
+    const s = samples[i];
+    if (s.height === undefined) continue;
+    const d = s.height - baseHeights[i];
+    if (d > 0) fillVol += d * cellArea;
+    else cutVol += -d * cellArea;
   }
-  return vol;
+
+  return {
+    fillVol,
+    cutVol,
+    netVol: fillVol - cutVol,
+    sampleCount: samples.length,
+    baseElevation: baseElevationAtCentroid,
+  };
+}
+
+/**
+ * Least-squares fit `z = a·lon + b·lat + c` to a set of (lon, lat, h)
+ * points. Used by `computeVolumeFromTerrain` when the user picks the
+ * `'fitted'` base plane — best for tilted ground where a flat plane
+ * biases the cut/fill split.
+ *
+ * Solved by closed-form normal equations on the 3×3 Gram matrix; the
+ * polygons we see in practice (tens of vertices, max) make iterative
+ * QR overkill. Returns the historical `'avg'` plane on degenerate
+ * input (collinear vertices, singular matrix) so we never propagate
+ * NaN into the volume sums.
+ */
+function fitPlaneRad(
+  cartos: Cartographic[],
+): { a: number; b: number; c: number } {
+  const n = cartos.length;
+  const mean =
+    cartos.reduce((s, c) => s + (c.height ?? 0), 0) / Math.max(1, n);
+  if (n < 3) return { a: 0, b: 0, c: mean };
+
+  // Build the 3×3 X^T·X and 3-vector X^T·z for the design matrix
+  // [lon, lat, 1]. `s1` is `n` because the third column of X is
+  // identically 1 — keep the name to match the closed-form derivation.
+  let sLL = 0, sLA = 0, sL = 0, sAA = 0, sA = 0;
+  const s1 = n;
+  let sLZ = 0, sAZ = 0, sZ = 0;
+  for (const c of cartos) {
+    const lon = c.longitude;
+    const lat = c.latitude;
+    const z = c.height ?? 0;
+    sLL += lon * lon;
+    sLA += lon * lat;
+    sL += lon;
+    sAA += lat * lat;
+    sA += lat;
+    sLZ += lon * z;
+    sAZ += lat * z;
+    sZ += z;
+  }
+
+  // Solve the 3×3 system by Cramer's rule. det == 0 → collinear input
+  // → fall back to the flat mean plane.
+  const det =
+    sLL * (sAA * s1 - sA * sA) -
+    sLA * (sLA * s1 - sA * sL) +
+    sL * (sLA * sA - sAA * sL);
+  if (Math.abs(det) < 1e-30) return { a: 0, b: 0, c: mean };
+
+  const detA =
+    sLZ * (sAA * s1 - sA * sA) -
+    sLA * (sAZ * s1 - sA * sZ) +
+    sL * (sAZ * sA - sAA * sZ);
+  const detB =
+    sLL * (sAZ * s1 - sA * sZ) -
+    sLZ * (sLA * s1 - sA * sL) +
+    sL * (sLA * sZ - sAZ * sL);
+  const detC =
+    sLL * (sAA * sZ - sAZ * sA) -
+    sLA * (sLA * sZ - sAZ * sL) +
+    sLZ * (sLA * sA - sAA * sL);
+
+  return { a: detA / det, b: detB / det, c: detC / det };
+}
+
+/**
+ * Total perimeter (closed loop) of the polygon defined by `points`,
+ * in metres. Each edge is computed as a great-circle arc on the WGS-84
+ * ellipsoid; the closing edge `points[n-1] → points[0]` is included so
+ * that callers don't have to repeat the first vertex at the end.
+ *
+ * Returns 0 for fewer than 2 points (no edge).
+ */
+export function computePerimeterMeters(points: Cartesian3[]): number {
+  if (points.length < 2) return 0;
+  let total = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = Cartographic.fromCartesian(points[i]);
+    const b = Cartographic.fromCartesian(points[(i + 1) % points.length]);
+    total += new EllipsoidGeodesic(a, b).surfaceDistance ?? 0;
+  }
+  return total;
+}
+
+/**
+ * Total ground (2D) distance — sum of geodesic surface arcs only,
+ * ignoring vertical deltas. Pair with `computeDistanceMeters` (which
+ * adds the vertical component) to expose the slant-vs-ground delta in
+ * the Distance card.
+ */
+export function computeGroundDistanceMeters(points: Cartesian3[]): number {
+  if (points.length < 2) return 0;
+  let total = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = Cartographic.fromCartesian(points[i - 1]);
+    const b = Cartographic.fromCartesian(points[i]);
+    total += new EllipsoidGeodesic(a, b).surfaceDistance ?? 0;
+  }
+  return total;
+}
+
+/**
+ * Compass bearing from `start` to `end`, in degrees normalised to
+ * [0, 360) — 0 = North, 90 = East. Uses `EllipsoidGeodesic.startHeading`
+ * (radians, [-π, π]) and shifts into the user-friendly compass range.
+ */
+export function computeBearingDeg(start: Cartesian3, end: Cartesian3): number {
+  const a = Cartographic.fromCartesian(start);
+  const b = Cartographic.fromCartesian(end);
+  const rad = new EllipsoidGeodesic(a, b).startHeading ?? 0;
+  return ((rad * 180) / Math.PI + 360) % 360;
 }
 
 /**

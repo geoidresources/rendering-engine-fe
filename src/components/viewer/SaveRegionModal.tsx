@@ -87,6 +87,7 @@ const SaveRegionForm: React.FC<SaveRegionFormProps> = ({
   surveyId,
 }) => {
   const vertices = useViewerStore((s) => s.drawing.vertices);
+  const defaults = useViewerStore((s) => s.drawing.defaults);
   const closeModal = useViewerStore((s) => s.closeDrawingModal);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
   const revealRailFor = useViewerStore((s) => s.revealRailFor);
@@ -115,11 +116,20 @@ const SaveRegionForm: React.FC<SaveRegionFormProps> = ({
   }, [materialRows]);
 
   // Lazy initialisers — only run on first mount, which happens once
-  // per modal open because the form is keyed off `open`.
+  // per modal open because the form is keyed off `open`. When the modal
+  // is opened from a non-Draw entry point (e.g. the Volume card's
+  // "Save as stockpile" button via `openSaveModalForMeasurement`), the
+  // store's `drawing.defaults` carries the operator-chosen material and
+  // a name suggestion — both flow into the initialisers here so the
+  // form opens with the right pre-fills, not stale defaults.
   const [name, setName] = useState(
-    () => `Region ${new Date().toISOString().slice(5, 16).replace('T', ' ')}`,
+    () =>
+      defaults?.name ??
+      `Region ${new Date().toISOString().slice(5, 16).replace('T', ' ')}`,
   );
-  const [material, setMaterial] = useState<string>(() => 'unclassified');
+  const [material, setMaterial] = useState<string>(
+    () => defaults?.material ?? 'unclassified',
+  );
 
   const handleCancel = () => {
     if (create.isPending) return;

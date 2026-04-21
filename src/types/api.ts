@@ -393,6 +393,11 @@ export interface UserRecord {
 // Each row covers one zone; diff_raster_url points to an XYZ tile set of
 // the elevation-difference raster (null when the processor hasn't written
 // tiles yet or the comparison pair has no raster).
+//
+// quality_* fields are emitted by the rendering-engine-be read-time gate
+// (Cut-Fill Quality Gate Addendum) when a row trips the filename
+// CRS-mismatch or extreme-depth signal. Healthy rows omit all three —
+// always check `quality_suspect` first before reading the others.
 export interface CutFillRecord {
   id: string;
   zone_id: string;
@@ -406,6 +411,9 @@ export interface CutFillRecord {
   diff_raster_url: string | null;
   provenance: Record<string, unknown>;
   created_at: string;
+  quality_suspect?: boolean;
+  quality_reason?: string;
+  quality_reason_code?: 'datum_mismatch' | 'extreme_depth';
 }
 
 // --- QA ---

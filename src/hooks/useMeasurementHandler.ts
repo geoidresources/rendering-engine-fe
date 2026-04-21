@@ -208,15 +208,28 @@ export function useMeasurementHandler(
             areaSquareMeters: area,
           });
 
-          const vol = await computeVolumeFromTerrain(viewer, verts);
-          addLabel(ds, centroid, `Vol: ${formatVolume(vol)}`, 16);
+          // `computeVolumeFromTerrain` now returns a {fillVol, cutVol,
+          // netVol, sampleCount, baseElevation} struct — the live chip +
+          // Inspector headline still want one number, so we surface
+          // `netVol` as `volumeCubicMeters` (matches the historical
+          // `Math.abs`-summed value when the polygon has no interior
+          // depressions, which is the common stockpile case). The full
+          // breakdown lives on `measurement.volumeBreakdown` for the
+          // Volume card to surface cut/fill chips + a confidence badge.
+          // Default base plane is 'avg' to preserve pre-card numbers.
+          const result = await computeVolumeFromTerrain(viewer, verts, {
+            basePlane: 'avg',
+          });
+          addLabel(ds, centroid, `Vol: ${formatVolume(result.netVol)}`, 16);
 
           setMeasurement({
             tool: 'volume',
             status: 'complete',
             points: mpts,
             areaSquareMeters: area,
-            volumeCubicMeters: vol,
+            volumeCubicMeters: result.netVol,
+            volumeBreakdown: result,
+            basePlane: 'avg',
           });
         } else {
           setMeasurement({

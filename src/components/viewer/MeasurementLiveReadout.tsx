@@ -56,6 +56,7 @@ import {
   formatDistance,
   formatVolume,
 } from '@/lib/cesium/measurementPrimitives';
+import { centroidOf } from '@/lib/cesium/profileMetrics';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -77,22 +78,11 @@ function pickAnchorPoint(
 ): MeasurementPoint | null {
   if (points.length === 0) return null;
   if (tool === 'distance') return points[points.length - 1];
-  // Centroid in WGS-84: a degree-space mean is fine here (the chip is a
-  // cosmetic anchor, not a geodesic computation, and the polygons users
-  // draw with this tool are almost always within a few hundred metres).
-  let sumLng = 0;
-  let sumLat = 0;
-  let sumH = 0;
-  for (const p of points) {
-    sumLng += p.longitude;
-    sumLat += p.latitude;
-    sumH += p.height;
-  }
-  return {
-    longitude: sumLng / points.length,
-    latitude: sumLat / points.length,
-    height: sumH / points.length,
-  };
+  // Centroid in WGS-84 — degree-space mean is enough for a cosmetic
+  // anchor (the polygons users draw with this tool are almost always
+  // within a few hundred metres). Delegated to `centroidOf` so the
+  // Inspector card and this chip never drift apart on the same input.
+  return centroidOf(points);
 }
 
 /**

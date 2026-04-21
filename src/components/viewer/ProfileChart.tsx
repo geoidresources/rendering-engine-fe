@@ -12,6 +12,7 @@ import {
 } from 'recharts';
 import { Mountain, Ruler, Sigma, X } from 'lucide-react';
 import { useViewerStore } from '@/store/viewerStore';
+import { computeProfileMetrics } from '@/lib/cesium/profileMetrics';
 import { cn } from '@/lib/utils';
 
 /* ─────────────────────── helpers ─────────────────────── */
@@ -79,19 +80,22 @@ export const ProfileChart: React.FC = () => {
   const setExaggeration = useViewerStore((s) => s.setProfileExaggeration);
   const clearProfile = useViewerStore((s) => s.clearProfile);
 
-  // Derive stats + Y domain from the samples. All useMemo so we don't
-  // recompute on the exaggeration-slider drag (only `domain` does).
+  // Derive stats + Y domain from the samples. The min/max/totalDistance
+  // computation is delegated to the shared `computeProfileMetrics` helper
+  // so the bottom-dock chart and the InspectorTab Profile card never
+  // disagree on the same input. `dataSpan` is the only chart-specific
+  // field — it floors the headline elevation delta at 0.5 m so the
+  // Y-axis padding never collapses to zero on flat terrain.
   const stats = useMemo(() => {
-    if (!samples || samples.length === 0) return null;
-    let yMin = Infinity;
-    let yMax = -Infinity;
-    for (const s of samples) {
-      if (s.height < yMin) yMin = s.height;
-      if (s.height > yMax) yMax = s.height;
-    }
-    const totalDist = samples[samples.length - 1].distance;
-    const dataSpan = Math.max(yMax - yMin, 0.5);
-    return { yMin, yMax, totalDist, dataSpan, delta: yMax - yMin };
+    if (!samples || samples.length < 2) return null;
+    const m = computeProfileMetrics(samples);
+    return {
+      yMin: m.minHeight,
+      yMax: m.maxHeight,
+      totalDist: m.totalDistance,
+      delta: m.maxHeight - m.minHeight,
+      dataSpan: Math.max(m.maxHeight - m.minHeight, 0.5),
+    };
   }, [samples]);
 
   const yDomain = useMemo<[number, number]>(() => {
@@ -111,7 +115,7 @@ export const ProfileChart: React.FC = () => {
       role="dialog"
       aria-label="Elevation profile"
       className={cn(
-        'absolute bottom-28 left-1/2 -translate-x-1/2 z-20',
+        'absolute bottom-44 left-1/2 -translate-x-1/2 z-20',
         'w-[min(820px,calc(100vw-32px))] rounded-sm border border-border-subtle',
         'bg-bg-surface/90 supports-[backdrop-filter]:bg-bg-surface/75 backdrop-blur-md shadow-2xl',
         'flex flex-col',

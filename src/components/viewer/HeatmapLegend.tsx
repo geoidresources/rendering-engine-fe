@@ -25,7 +25,7 @@ export const HeatmapLegend: React.FC = () => {
       anchor="bottom-left"
       title="Cut / Fill"
       width={176}
-      className="bottom-16"
+      className="bottom-9"
     >
       <div className="flex flex-col gap-1 px-3 py-2">
         <div

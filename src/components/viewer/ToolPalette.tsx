@@ -74,6 +74,18 @@ export const ToolPalette: React.FC = () => {
   // Phase 2 for the rationale.
   const activeTool = useViewerStore((s) => s.activeTool);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
+  // Right inset has to track the rail width (360 px expanded, 36 px
+  // collapsed) so the toolbar doesn't waste space — without this the
+  // pill stays pinned ~340 px shy of the canvas edge even after the
+  // user collapses the rail.
+  const railCollapsed = useViewerStore((s) => s.rightRailCollapsed);
+  // Quick terrain-mode chip lives next to the verb toolbar so the
+  // operator can flip DTM ↔ DSM without opening the Layers rail. The
+  // canonical control still lives in LayersTab; this is a shortcut
+  // mirror, not a separate source of truth.
+  const terrainMode = useViewerStore((s) => s.terrainMode);
+  const setTerrainMode = useViewerStore((s) => s.setTerrainMode);
+  const terrainVisible = useViewerStore((s) => s.layers.dsm.visible);
 
   const {
     activateMode,
@@ -120,7 +132,12 @@ export const ToolPalette: React.FC = () => {
     // enough that the extra inset read as wasted space. Right-bound
     // keeps it from sliding under the 360-px rail; the pill is now
     // narrow enough that wrapping shouldn't trigger on any sane width.
-    <div className="absolute top-3 left-3 right-[376px] z-20 flex flex-col items-start gap-1.5">
+    <div
+      className={cn(
+        'absolute top-3 left-3 z-20 flex flex-col items-start gap-1.5',
+        railCollapsed ? 'right-14' : 'right-[376px]',
+      )}
+    >
       {/* One unified pill: modes → optional submodes → terrain segment.
           Glassy, fully rounded, hairline borders, soft tonal selection
           — no accent fill on the top-level modes (it's noisy), no
@@ -199,13 +216,45 @@ export const ToolPalette: React.FC = () => {
           </>
         )}
 
-        {/*
-         * DTM/DSM lived here originally, but it's a *layer setting*
-         * (which version of one terrain to render), not a verb. Moved
-         * into the LayersTab Terrain row alongside opacity. The toolbar
-         * now holds verbs only — Select / Measure / Draw / Compare /
-         * Annotate.
-         */}
+        {/* Terrain mode (DTM ↔ DSM) — quick chrome mirror of the
+            LayersTab control. Sits behind a divider so the verb
+            toolbar's identity stays clear, but it's one click closer
+            so operators can flip surface ↔ bare-earth without leaving
+            the canvas. Disabled when terrain itself is hidden. */}
+        <div className="mx-1 h-5 w-px bg-white/10" aria-hidden />
+        <div
+          role="group"
+          aria-label="Terrain mode"
+          title={
+            terrainVisible
+              ? 'Switch terrain surface'
+              : 'Turn the Terrain layer on to switch surface'
+          }
+          className={cn(
+            'inline-flex items-center rounded-full bg-bg-base/40 p-0.5',
+            !terrainVisible && 'opacity-40 pointer-events-none',
+          )}
+        >
+          {(['dtm', 'dsm'] as const).map((m) => {
+            const active = terrainMode === m;
+            return (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setTerrainMode(m)}
+                aria-pressed={active}
+                className={cn(
+                  'h-7 min-w-[2.25rem] px-2 rounded-full text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors',
+                  active
+                    ? 'bg-accent text-bg-base'
+                    : 'text-text-muted/80 hover:text-text-primary',
+                )}
+              >
+                {m === 'dtm' ? 'DTM' : 'DSM'}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Hint chip — only renders when a mode that needs guidance is
