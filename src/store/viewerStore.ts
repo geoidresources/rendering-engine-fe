@@ -1,7 +1,9 @@
 import { create } from 'zustand';
+import { Cartesian3, type Viewer as CesiumViewer } from 'cesium';
 import { Manifest, Bounds } from '../types/manifest';
 import { apiClient } from '../lib/http';
 import type { Project } from '../types/api';
+import { computeVolumeFromTerrain } from '../lib/cesium/measurementPrimitives';
 
 export type LayerId =
   | 'ortho'
@@ -37,6 +39,27 @@ export interface MeasurementPoint {
   height: number;
 }
 
+/**
+ * Cut/fill split + sample diagnostics for the most recent volume
+ * computation. Mirrors the shape returned by `computeVolumeFromTerrain`
+ * in `lib/cesium/measurementPrimitives.ts` so callers can surface the
+ * pieces (cut, fill, base elevation, sample count) without re-importing
+ * the Cesium primitive types into store consumers.
+ *
+ * `volumeCubicMeters` (above) is the headline number — equal to
+ * `breakdown.netVol` and kept on the parent for backwards compatibility
+ * with the live readout chip and the Inspector measurement section.
+ */
+export interface VolumeBreakdown {
+  fillVol: number;
+  cutVol: number;
+  netVol: number;
+  sampleCount: number;
+  baseElevation: number;
+}
+
+export type VolumeBasePlane = 'avg' | 'min' | 'max' | 'fitted';
+
 export interface MeasurementState {
   tool: 'distance' | 'area' | 'volume' | null;
   status: 'idle' | 'drawing' | 'complete';
@@ -44,6 +67,12 @@ export interface MeasurementState {
   distanceMeters?: number;
   areaSquareMeters?: number;
   volumeCubicMeters?: number;
+  /** Populated after the volume tool completes; null while sampling. */
+  volumeBreakdown?: VolumeBreakdown;
+  /** Base-plane method the user picked in the Volume card. Drives a
+   *  re-run of `computeVolumeFromTerrain`; defaults to `'avg'` to
+   *  preserve the historical numbers. */
+  basePlane?: VolumeBasePlane;
 }
 
 export interface SelectedAreaDetails {
@@ -121,6 +150,23 @@ export interface ViewerState {
   measurement: MeasurementState;
   setMeasurement: (measurement: MeasurementState) => void;
   clearMeasurement: () => void;
+  /**
+   * Re-run `computeVolumeFromTerrain` against the current Volume polygon
+   * with a different base-plane method, and write back the updated
+   * `volumeBreakdown` + headline `volumeCubicMeters`. Called by the
+   * Volume card's base-plane dropdown so the operator can compare
+   * avg / min / max / fitted without redrawing.
+   *
+   * No-ops (returns immediately) if the active measurement isn't a
+   * Volume in 'complete' status with at least 3 points — defensive
+   * because the dropdown shouldn't be reachable otherwise. Takes the
+   * viewer as a parameter rather than holding it in the store so we
+   * don't entangle Zustand state with a non-serialisable Cesium handle.
+   */
+  recomputeVolume: (
+    viewer: CesiumViewer,
+    opts: { basePlane: VolumeBasePlane },
+  ) => Promise<void>;
 
   // Camera state (Cesium coordinate system)
   cameraState: CesiumCameraState;
@@ -168,6 +214,21 @@ export interface ViewerState {
   finalizeDrawing: () => void;
   cancelDrawing: () => void;
   closeDrawingModal: () => void;
+  /**
+   * Lifts a finished Volume measurement into the SaveRegionModal flow:
+   * copies its polygon vertices into `drawing.vertices`, seeds
+   * `drawing.defaults` with the operator-chosen material (so the
+   * modal's material dropdown opens on the right value, not
+   * `'unclassified'`), and pops the modal. Used by the
+   * `<MeasurementResultsCard />` Volume sub-view's "Save as stockpile"
+   * action — keeps the modal as the single source of truth for
+   * region-creation UX (validation, error toasts, processor link)
+   * rather than duplicating its form inside the card.
+   */
+  openSaveModalForMeasurement: (
+    points: MeasurementPoint[],
+    defaults?: { material?: string; name?: string },
+  ) => void;
 
   // Elevation profile / cross-section — populated by `useProfileHandler`
   // after the user finishes a polyline and we sample terrain at N evenly
@@ -205,6 +266,13 @@ export interface DrawingState {
   /** Set true when the user finishes the polygon (right-click /
    *  double-click). The viewer mounts the SaveRegionModal off this flag. */
   modalOpen: boolean;
+  /** Optional pre-fills for the SaveRegionModal — set when the modal is
+   *  opened from a path *other* than the Draw tool (e.g. the Volume
+   *  card's "Save as stockpile" action passes the operator-chosen
+   *  material here so the modal's dropdown opens on the right value).
+   *  Cleared on `cancelDrawing` / `closeDrawingModal` so a subsequent
+   *  Draw-tool open doesn't inherit a stale material. */
+  defaults?: { material?: string; name?: string };
 }
 
 /**
@@ -411,6 +479,32 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   measurement: initialMeasurement,
   setMeasurement: (measurement) => set({ measurement }),
   clearMeasurement: () => set({ measurement: initialMeasurement }),
+  recomputeVolume: async (viewer, opts) => {
+    const m = get().measurement;
+    // Guard rails: only run on a finished Volume polygon. The dropdown
+    // shouldn't be visible otherwise, but a stale dispatch (e.g. user
+    // reset the measurement mid-await) would otherwise NaN the store.
+    if (m.tool !== 'volume' || m.points.length < 3) return;
+    const verts = m.points.map((p) =>
+      Cartesian3.fromDegrees(p.longitude, p.latitude, p.height),
+    );
+    const result = await computeVolumeFromTerrain(viewer, verts, {
+      basePlane: opts.basePlane,
+    });
+    // Re-read the latest measurement *after* the await — the user may
+    // have started a new measurement while the terrain sample was in
+    // flight; if so we'd be writing stale numbers into a fresh state.
+    const current = get().measurement;
+    if (current.tool !== 'volume' || current.points.length < 3) return;
+    set({
+      measurement: {
+        ...current,
+        volumeCubicMeters: result.netVol,
+        volumeBreakdown: result,
+        basePlane: opts.basePlane,
+      },
+    });
+  },
 
   cameraState: initialCameraState,
   setCameraState: (cameraState) => set({ cameraState }),
@@ -478,6 +572,15 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set({ drawing: { active: false, vertices: [], modalOpen: false } }),
   closeDrawingModal: () =>
     set({ drawing: { active: false, vertices: [], modalOpen: false } }),
+  openSaveModalForMeasurement: (points, defaults) =>
+    set({
+      drawing: {
+        active: false,
+        vertices: points,
+        modalOpen: true,
+        defaults,
+      },
+    }),
 
   profile: { samples: null, mode: 'profile', exaggeration: 1 },
   setProfileSamples: (samples, mode) =>

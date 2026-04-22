@@ -2,6 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import {
+  AlertTriangle,
   ArrowDownUp,
   ChevronDown,
   Download,
@@ -10,6 +11,7 @@ import {
   MoveHorizontal,
   TrendingDown,
   TrendingUp,
+  X,
 } from 'lucide-react';
 import { useCompareStore } from '@/store/compareStore';
 import { useViewerStore } from '@/store/viewerStore';
@@ -71,6 +73,7 @@ interface ZoneRowProps {
 const ZoneRow: React.FC<ZoneRowProps> = ({ row, onFly }) => {
   const net = row.net_change_m3;
   const isCut = net < 0;
+  const suspect = row.quality_suspect === true;
   return (
     <button
       type="button"
@@ -78,12 +81,30 @@ const ZoneRow: React.FC<ZoneRowProps> = ({ row, onFly }) => {
       className="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-bg-elevated transition-colors text-left group"
     >
       <span className={cn('size-1.5 rounded-full shrink-0', isCut ? 'bg-red-400' : 'bg-blue-400')} />
-      <span className="flex-1 min-w-0 truncate text-[11px] text-text-primary">
+      <span
+        className={cn(
+          'flex-1 min-w-0 truncate text-[11px]',
+          suspect ? 'text-text-muted' : 'text-text-primary',
+        )}
+      >
         {row.zone_name || row.zone_id || 'Unknown zone'}
       </span>
+      {suspect && (
+        <span
+          // The chip mirrors the dock-level banner in colour so an operator
+          // who scans only the list still sees the same red signal. The
+          // tooltip carries the human-readable reason from the gate.
+          title={row.quality_reason ?? 'Numbers may be unreliable.'}
+          className="shrink-0 inline-flex items-center gap-0.5 rounded-sm border border-red-400/40 bg-red-400/10 px-1 py-0.5 text-[8px] uppercase tracking-[0.12em] text-red-400"
+        >
+          <AlertTriangle className="size-2.5" />
+          Suspect
+        </span>
+      )}
       <span
         className={cn(
           'text-[10px] font-mono tabular-nums shrink-0',
+          suspect && 'line-through opacity-60',
           isCut ? 'text-red-400' : 'text-blue-400',
         )}
       >
@@ -122,6 +143,10 @@ export const CompareDock: React.FC = () => {
 
   const [sortKey, setSortKey] = useState<SortKey>('net');
   const [exporting, setExporting] = useState(false);
+  // Banner is dismissable per session via local state — operators should
+  // re-see it on a fresh dock mount (toggle compare off/on or page refresh)
+  // because the suspect signal can change as rows finish (re)processing.
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
   const { data: rows = [], isLoading, error } = useCutFill(epochA, epochB);
 
@@ -131,6 +156,31 @@ export const CompareDock: React.FC = () => {
     const fill = rows.reduce((s, r) => s + (r.fill_volume_m3 ?? 0), 0);
     return { cut, fill, net: fill - cut };
   }, [rows]);
+
+  // Quality gate aggregation. anySuspect drives the KPI mute + the banner
+  // visibility; suspectReasons is the de-duped, human-readable summary the
+  // banner uses so the operator sees one short sentence for many rows
+  // tripping the same signal.
+  const { anySuspect, suspectReasons } = useMemo(() => {
+    const suspectRows = rows.filter((r) => r.quality_suspect === true);
+    if (suspectRows.length === 0) {
+      return { anySuspect: false, suspectReasons: '' };
+    }
+    const codeToLabel: Record<string, string> = {
+      datum_mismatch: 'vertical datum mismatch',
+      extreme_depth: 'implausible effective depth',
+    };
+    const labels = Array.from(
+      new Set(
+        suspectRows.map(
+          (r) => codeToLabel[r.quality_reason_code ?? ''] ?? 'data quality issue',
+        ),
+      ),
+    );
+    return { anySuspect: true, suspectReasons: labels.join(', ') };
+  }, [rows]);
+
+  const showBanner = anySuspect && !bannerDismissed;
 
   // Sorted zone list
   const sorted = useMemo(
@@ -181,7 +231,7 @@ export const CompareDock: React.FC = () => {
       role="region"
       aria-label="Cut / fill comparison"
       className={cn(
-        'absolute bottom-16 left-1/2 -translate-x-1/2 z-20',
+        'absolute bottom-9 left-1/2 -translate-x-1/2 z-20',
         'w-[520px] max-w-[calc(100vw-8rem)]',
         'rounded-sm border border-border-subtle bg-bg-surface/90 backdrop-blur-md',
         'supports-[backdrop-filter]:bg-bg-surface/75',
@@ -205,6 +255,34 @@ export const CompareDock: React.FC = () => {
         />
       </div>
 
+      {/* ── Suspect banner (Cut-Fill Quality Gate Addendum) ─────────── */}
+      {showBanner && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 px-3 py-2 border-b border-border-subtle bg-red-400/10 text-red-400"
+        >
+          <AlertTriangle className="size-3.5 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0 text-[11px] leading-tight">
+            <span className="font-semibold">Numbers may be unreliable</span>
+            {suspectReasons && (
+              <span className="text-text-muted"> — {suspectReasons}.</span>
+            )}
+            <span className="text-text-muted">
+              {' '}
+              Hover any row marked Suspect for details.
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBannerDismissed(true)}
+            aria-label="Dismiss data-quality warning"
+            className="shrink-0 p-0.5 rounded-sm hover:bg-red-400/20 transition-colors"
+          >
+            <X className="size-3" />
+          </button>
+        </div>
+      )}
+
       {/* ── KPI row ────────────────────────────────────── */}
       <div className="grid grid-cols-3 divide-x divide-border-subtle border-b border-border-subtle">
         {[
@@ -214,10 +292,19 @@ export const CompareDock: React.FC = () => {
         ].map(({ label, value, color, Icon }) => (
           <div key={label} className="flex flex-col items-center gap-0.5 py-2">
             <div className="flex items-center gap-1">
-              <Icon className={cn('size-3', color)} />
+              <Icon className={cn('size-3', anySuspect ? 'text-text-muted' : color)} />
               <span className="text-[9px] uppercase tracking-[0.15em] text-text-muted">{label}</span>
             </div>
-            <span className={cn('text-[13px] font-semibold tabular-nums', color)}>
+            <span
+              // When any row in the result trips the quality gate, mute the
+              // headline KPIs so the user doesn't read them as authoritative;
+              // the per-row chips still let them inspect which rows are bad.
+              title={anySuspect ? 'At least one zone tripped the data-quality gate — see Suspect chips below.' : undefined}
+              className={cn(
+                'text-[13px] font-semibold tabular-nums',
+                anySuspect ? 'text-text-muted line-through opacity-70' : color,
+              )}
+            >
               {isLoading ? '—' : fmtVol(value)}
             </span>
           </div>
