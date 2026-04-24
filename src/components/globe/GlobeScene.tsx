@@ -95,15 +95,25 @@ async function buildLandCanvas(): Promise<ImageData> {
     }
   };
 
-  const geom = (land as any).geometry ?? (land as any).features?.[0]?.geometry;
+  type Ring = number[][];
+  type Poly = Ring[];
+  type Geom =
+    | { type: "MultiPolygon"; coordinates: Poly[] }
+    | { type: "Polygon"; coordinates: Poly };
+  type LandShape = {
+    geometry?: Geom;
+    features?: { geometry: Geom }[];
+  };
+  const shape = land as unknown as LandShape;
+  const geom = shape.geometry ?? shape.features?.[0]?.geometry;
   if (geom?.type === "MultiPolygon") {
     for (const poly of geom.coordinates) drawRings(poly);
   } else if (geom?.type === "Polygon") {
     drawRings(geom.coordinates);
   }
   // FeatureCollection path
-  if ((land as any).features) {
-    for (const feat of (land as any).features) {
+  if (shape.features) {
+    for (const feat of shape.features) {
       const g = feat.geometry;
       if (g.type === "MultiPolygon") for (const p of g.coordinates) drawRings(p);
       else if (g.type === "Polygon") drawRings(g.coordinates);
@@ -489,7 +499,7 @@ export default function GlobeScene({
           depthWrite: false,
         });
         for (let i = 0; i < ARC_COUNT; i++) {
-          let a = Math.floor(Math.random() * landVecs.length);
+          const a = Math.floor(Math.random() * landVecs.length);
           let b = Math.floor(Math.random() * landVecs.length);
           // ensure they're far enough apart for a visible arc
           let tries = 0;
@@ -548,7 +558,7 @@ export default function GlobeScene({
           const ring = new THREE.Mesh(new THREE.RingGeometry(0.018, 0.024, 48), ringMat);
           ring.position.copy(mPos);
           ring.lookAt(new THREE.Vector3(0, 0, 0));
-          (ring as any).__phase = (k / 3) * Math.PI * 2;
+          (ring as unknown as { __phase: number }).__phase = (k / 3) * Math.PI * 2;
           globe.add(ring);
           pulseRings.push(ring);
         }
@@ -800,7 +810,7 @@ export default function GlobeScene({
         }
 
         for (const ring of pulseRings) {
-          const phase = (ring as any).__phase as number;
+          const phase = (ring as unknown as { __phase: number }).__phase;
           const cycle = ((t * 1.2 + phase) % (Math.PI * 2)) / (Math.PI * 2);
           const s = 1 + cycle * 3.5;
           ring.scale.set(s, s, s);

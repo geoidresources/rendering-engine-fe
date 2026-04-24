@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/http';
 
 /**
@@ -65,6 +65,36 @@ export function useMaterialDensities() {
       return [];
     },
     staleTime: 5 * 60_000,
+  });
+}
+
+export interface UpsertMaterialDensityBody {
+  material: string;
+  bulk_density_t_m3: number;
+  swell_factor: number;
+}
+
+export function useUpsertMaterialDensity() {
+  const qc = useQueryClient();
+  return useMutation<MaterialDensity, Error, UpsertMaterialDensityBody>({
+    mutationFn: async (body) => {
+      const res = await apiClient.post<{ data: MaterialDensity }>(
+        '/api/v1/analytics/material-densities',
+        body,
+      );
+      return res.data.data;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['analytics', 'material-densities'] }),
+  });
+}
+
+export function useDeleteMaterialDensity() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: async (material) => {
+      await apiClient.delete(`/api/v1/analytics/material-densities/${encodeURIComponent(material)}`);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['analytics', 'material-densities'] }),
   });
 }
 

@@ -46,13 +46,14 @@ export default function ThresholdsPopover() {
 
   const [green, setGreen] = useState<string>("");
   const [amber, setAmber] = useState<string>("");
-
-  useEffect(() => {
+  const [prevActive, setPrevActive] = useState(active);
+  if (active !== prevActive) {
+    setPrevActive(active);
     if (active) {
       setGreen(String(active.green_upper_pct));
       setAmber(String(active.amber_upper_pct));
     }
-  }, [active]);
+  }
 
   useEffect(() => {
     if (!open) return;

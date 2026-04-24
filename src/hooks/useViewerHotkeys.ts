@@ -69,6 +69,7 @@ const TAB_ORDER: RightRailTab[] = [
   'inspector',
   'measurements',
   'compare',
+  'bookmarks',
 ];
 
 const DIGIT_TO_INDEX: Record<string, number> = {
@@ -77,6 +78,7 @@ const DIGIT_TO_INDEX: Record<string, number> = {
   Digit3: 2,
   Digit4: 3,
   Digit5: 4,
+  Digit6: 5,
 };
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -94,15 +96,27 @@ export function useViewerHotkeys(): void {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      // Bail on text input / contenteditable so we don't steal letters
-      // from the SaveRegionModal name field, the AnnotationModal text
-      // box, etc.
       if (isEditableTarget(e.target)) return;
-
-      // Bail on modifier-bearing keystrokes — never shadow native
-      // shortcuts like ⌘V / ⌃C / ⌥M. (Shift on its own is fine; the
-      // letter codes below already match Shift+letter via `code`.)
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // V-COMPARE-03 — ← / → step through epochs on the timeline.
+      // Read store state inline so the closure doesn't need to track
+      // the full surveys array in its dep list (it would re-register
+      // on every survey load which is noisy).
+      if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+        const { availableSurveys, activeSurveyId, switchSurvey } =
+          useViewerStore.getState();
+        if (availableSurveys.length < 2) return;
+        const ix = availableSurveys.findIndex((s) => s.id === activeSurveyId);
+        const next =
+          e.code === 'ArrowLeft'
+            ? availableSurveys[ix - 1]
+            : availableSurveys[ix + 1];
+        if (!next) return;
+        e.preventDefault();
+        switchSurvey(next.id);
+        return;
+      }
 
       // Letter → top-level tool mode.
       const modeId = MODE_KEY_MAP[e.code];
@@ -117,11 +131,6 @@ export function useViewerHotkeys(): void {
       if (idx === undefined) return;
 
       if (measureActive) {
-        // Mid-drawing collision guard: the measurement handler rebinds
-        // every time `activeTool` flips, and the new binding starts
-        // with an empty `verticesRef`. Without this guard, the user
-        // hits `2` mid-area-polygon, the polygon silently disappears,
-        // and they conclude the tool is broken (again).
         const measurement = useViewerStore.getState().measurement;
         if (measurement.status === 'drawing' && measurement.points.length > 0) {
           e.preventDefault();

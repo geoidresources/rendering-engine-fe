@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { Cartesian3, type Viewer as CesiumViewer } from 'cesium';
 import { Manifest, Bounds } from '../types/manifest';
 import { apiClient } from '../lib/http';
-import type { Project } from '../types/api';
+import type { Project, ViewerPresetConfig } from '../types/api';
 import { computeVolumeFromTerrain } from '../lib/cesium/measurementPrimitives';
 
 export type LayerId =
@@ -13,7 +13,8 @@ export type LayerId =
   | 'site_model'
   | 'heatmap'
   | 'contours'
-  | 'annotations';
+  | 'annotations'
+  | 'design_overlay';
 export type TerrainMode = 'dtm' | 'dsm';
 export type ToolMode =
   | 'select'
@@ -25,7 +26,7 @@ export type ToolMode =
   | 'cross-section'
   | 'annotate';
 export type BlendPreset = 'stacked' | 'embedded';
-export type RightRailTab = 'overview' | 'layers' | 'inspector' | 'measurements' | 'compare';
+export type RightRailTab = 'overview' | 'layers' | 'inspector' | 'measurements' | 'compare' | 'bookmarks';
 export type RailRevealReason =
   | 'selection'
   | 'compare-on'
@@ -73,6 +74,11 @@ export interface MeasurementState {
    *  re-run of `computeVolumeFromTerrain`; defaults to `'avg'` to
    *  preserve the historical numbers. */
   basePlane?: VolumeBasePlane;
+  /** V-TRUST-02 — epoch (ms) when the volume sum was last written by
+   *  `recomputeVolume`. Drives the card's provenance footer so operators
+   *  can see whether the number is fresh relative to the currently
+   *  loaded survey / terrain. */
+  computedAt?: number;
 }
 
 export interface SelectedAreaDetails {
@@ -112,6 +118,13 @@ export interface CesiumCameraState {
 export interface ViewerState {
   // Manifest Data
   manifest: Manifest | null;
+  /** Set while a `loadManifest` fetch is in flight for an id we don't have yet.
+   * Drives the initial fullscreen loader; flips to false on success OR terminal
+   * failure so the UI is never stuck. */
+  manifestLoading: boolean;
+  /** Populated when both the v1 and legacy fallback fetches fail. Used by the
+   * viewer to render an error panel instead of the loader. */
+  manifestError: { status: number; message: string; surveyId: string } | null;
   loadManifest: (id: string) => Promise<void>;
   getAssetUrl: (type: string, format?: string) => string | undefined;
 
@@ -138,6 +151,17 @@ export interface ViewerState {
   blendPreset: BlendPreset;
   setBlendPreset: (preset: BlendPreset) => void;
 
+  // V-TASK-01 — workspace preset currently applied. `null` means the user
+  // is running the raw defaults or has drifted from a preset. The picker
+  // writes the preset id here when "Apply" is clicked; any subsequent
+  // store mutation that's *not* part of the preset (e.g. the operator
+  // toggles a layer off by hand) does NOT clear this — drift tracking is
+  // out of scope for Sprint-1. The Layers-tab "Advanced" accordion
+  // (V-TASK-02, Sprint-2) will use this id as its source of truth.
+  activePresetId: string | null;
+  setActivePresetId: (id: string | null) => void;
+  applyPreset: (id: string, config: ViewerPresetConfig) => void;
+
   // Selection
   selectedFeature: Record<string, unknown> | null;
   setSelectedFeature: (feature: Record<string, unknown> | null) => void;
@@ -150,6 +174,11 @@ export interface ViewerState {
   measurement: MeasurementState;
   setMeasurement: (measurement: MeasurementState) => void;
   clearMeasurement: () => void;
+  /** When true, the Volume tool renders an extruded prism preview over
+   *  the completed polygon (base plane → base + mean height). Purely a
+   *  visual toggle; does not affect the numeric computation. */
+  showMeshPreview: boolean;
+  setShowMeshPreview: (v: boolean) => void;
   /**
    * Re-run `computeVolumeFromTerrain` against the current Volume polygon
    * with a different base-plane method, and write back the updated
@@ -243,18 +272,20 @@ export interface ViewerState {
   setProfileExaggeration: (factor: number) => void;
   clearProfile: () => void;
 
-  // Pin annotations — created via the Annotate tool. The handler captures
-  // a click, opens the modal seeded with `annotationDraft.point`, and on
-  // save the resulting `Annotation` is appended to `annotations` and
-  // synced into a dedicated Cesium datasource by `useAnnotationLayer`.
-  // Visibility is driven by `layers.annotations.visible` so the existing
-  // Layers tab toggle works without any per-feature wiring.
+  // Pin annotations — created via the Annotate tool. `annotations` is
+  // populated by `useAnnotations` which fetches from the backend and calls
+  // `setAnnotations` on load / mutation success. The Cesium datasource in
+  // `useAnnotationLayer` reads from here.
   annotations: Annotation[];
+  setAnnotations: (annotations: Annotation[]) => void;
   annotationDraft: AnnotationDraft;
   startAnnotationDraft: (point: MeasurementPoint) => void;
   cancelAnnotationDraft: () => void;
-  addAnnotation: (text: string) => void;
-  removeAnnotation: (id: string) => void;
+
+  // V-TASK-03: design overlay — GeoJSON loaded client-side from an uploaded
+  // Shapefile or GeoJSON file. Rendered as a dashed stroke on the scene.
+  designOverlayGeoJSON: object | null;
+  setDesignOverlay: (geojson: object | null) => void;
 }
 
 export interface DrawingState {
@@ -345,6 +376,8 @@ const initialLayers: Record<LayerId, LayerState> = {
   // visual effect — the slider is left in for layout consistency with
   // the other layer cards but the renderer ignores the value.
   annotations: { id: 'annotations', name: 'Annotations', visible: true, opacity: 1, loading: false, error: null },
+  // Design overlay is off and empty until the user uploads a file.
+  design_overlay: { id: 'design_overlay', name: 'Design Overlay', visible: false, opacity: 0.7, loading: false, error: null },
 };
 
 // Mine site centre: lon=152.414949, lat=-32.062341
@@ -386,46 +419,80 @@ function cameraFromBounds(manifest: Manifest): CesiumCameraState | null {
   };
 }
 
+// Module-level in-flight map so sidebar prefetch + Viewer mount can't race
+// into two parallel fetches for the same survey. Lives outside the store so
+// a Fast Refresh remount doesn't wipe it mid-flight.
+const manifestInflight = new Map<string, Promise<void>>();
+
 export const useViewerStore = create<ViewerState>((set, get) => ({
   manifest: null,
+  manifestLoading: false,
+  manifestError: null,
 
   loadManifest: async (id: string) => {
-    try {
-      const surveyId = id.includes('?') ? id.split('?')[0] : id;
-      let manifest: Manifest;
+    const surveyId = id.includes('?') ? id.split('?')[0] : id;
 
-      // Try v1 dynamic manifest first (BuildManifest from DB).
-      // Falls back to legacy static manifest endpoint for non-UUID IDs
-      // (e.g. "rendering-assets-v2") or if the v1 endpoint returns 404.
+    // Dedupe 1: identical manifest already resolved — nothing to do.
+    const current = get().manifest;
+    if (current && current.surveyId === surveyId) return;
+
+    // Dedupe 2: another call for the same id is already in flight. Attach
+    // to it instead of firing a second HTTP round-trip. The sidebar
+    // prefetch + Viewer's own useEffect routinely race through here.
+    const inflight = manifestInflight.get(surveyId);
+    if (inflight) return inflight;
+
+    const task = (async () => {
+      set({ manifestLoading: true, manifestError: null });
       try {
-        const resp = await apiClient.get<Manifest>(`/api/v1/surveys/${surveyId}/manifest`);
-        manifest = resp.data;
-        // If the DB-built manifest came back empty (survey exists in surveys
-        // table but has no processed assets yet), fall through to the legacy
-        // static manifest which may have hand-authored data.
-        if (!manifest.assets || manifest.assets.length === 0) {
-          throw new Error('v1 manifest has no assets — trying legacy fallback');
-        }
-      } catch {
-        // Fallback: legacy static manifest (e.g. for dev/demo without DB).
-        // Use apiClient (not bare fetch) so the auth token is included.
-        const fallback = await apiClient.get<Manifest>(`/api/manifests/${surveyId}`);
-        manifest = fallback.data;
-      }
+        let manifest: Manifest;
 
-      const nextState: Partial<ViewerState> = { manifest };
-      const cameraFromManifest = cameraFromBounds(manifest);
-      if (cameraFromManifest) {
-        nextState.cameraState = cameraFromManifest;
+        // Try v1 dynamic manifest first (BuildManifest from DB).
+        // Falls back to legacy static manifest endpoint for non-UUID IDs
+        // (e.g. "rendering-assets-v2") or if the v1 endpoint returns 404.
+        try {
+          const resp = await apiClient.get<Manifest>(`/api/v1/surveys/${surveyId}/manifest`);
+          manifest = resp.data;
+          if (!manifest.assets || manifest.assets.length === 0) {
+            throw new Error('v1 manifest has no assets — trying legacy fallback');
+          }
+        } catch {
+          const fallback = await apiClient.get<Manifest>(`/api/manifests/${surveyId}`);
+          manifest = fallback.data;
+        }
+
+        const nextState: Partial<ViewerState> = {
+          manifest,
+          manifestLoading: false,
+          manifestError: null,
+        };
+        const cameraFromManifest = cameraFromBounds(manifest);
+        if (cameraFromManifest) nextState.cameraState = cameraFromManifest;
+        const defaultTerrainExaggeration = manifest.rendering?.terrainExaggeration;
+        if (typeof defaultTerrainExaggeration === 'number' && Number.isFinite(defaultTerrainExaggeration)) {
+          nextState.terrainExaggeration = defaultTerrainExaggeration;
+        }
+        set(nextState as Pick<ViewerState, 'manifest' | 'cameraState' | 'terrainExaggeration' | 'manifestLoading' | 'manifestError'>);
+      } catch (error) {
+        // Expected failure modes (401 when logged out, 404 for missing
+        // surveys) would otherwise blow up the Next.js dev error overlay
+        // every render. Use `warn` so the message still lands in the
+        // console but doesn't trigger the red dev-mode toast.
+        const err = error as { status?: number; message?: string };
+        const status = typeof err?.status === 'number' ? err.status : 0;
+        const message = err?.message ?? 'Unknown error';
+        console.warn(`[viewerStore] manifest fetch failed (${status}): ${message}`);
+        set({
+          manifestLoading: false,
+          manifestError: { status, message, surveyId },
+        });
+      } finally {
+        manifestInflight.delete(surveyId);
       }
-      const defaultTerrainExaggeration = manifest.rendering?.terrainExaggeration;
-      if (typeof defaultTerrainExaggeration === 'number' && Number.isFinite(defaultTerrainExaggeration)) {
-        nextState.terrainExaggeration = defaultTerrainExaggeration;
-      }
-      set(nextState as Pick<ViewerState, 'manifest' | 'cameraState' | 'terrainExaggeration'>);
-    } catch (error) {
-      console.error('Error loading manifest:', error);
-    }
+    })();
+
+    manifestInflight.set(surveyId, task);
+    return task;
   },
 
   getAssetUrl: (type: string, format?: string) => {
@@ -454,6 +521,53 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   blendPreset: 'stacked',
   setBlendPreset: (blendPreset) => set({ blendPreset }),
 
+  activePresetId: null,
+  setActivePresetId: (id) => set({ activePresetId: id }),
+  applyPreset: (id, config) =>
+    set((state) => {
+      const nextLayers = { ...state.layers };
+      if (config.layers) {
+        for (const [layerId, layerCfg] of Object.entries(config.layers)) {
+          const typed = layerId as LayerId;
+          if (nextLayers[typed] && layerCfg) {
+            nextLayers[typed] = {
+              ...nextLayers[typed],
+              visible: Boolean(layerCfg.visible),
+              opacity:
+                typeof layerCfg.opacity === 'number' && Number.isFinite(layerCfg.opacity)
+                  ? Math.min(1, Math.max(0, layerCfg.opacity))
+                  : nextLayers[typed].opacity,
+            };
+          }
+        }
+      }
+      const patch: Partial<ViewerState> = {
+        layers: nextLayers,
+        activePresetId: id,
+      };
+      if (config.terrainMode === 'dtm' || config.terrainMode === 'dsm') {
+        patch.terrainMode = config.terrainMode;
+      }
+      if (config.blendPreset === 'stacked' || config.blendPreset === 'embedded') {
+        patch.blendPreset = config.blendPreset;
+      }
+      if (
+        typeof config.activeTool === 'string' &&
+        (['select', 'distance', 'area', 'volume', 'draw-polygon', 'profile', 'cross-section', 'annotate'] as ToolMode[]).includes(
+          config.activeTool as ToolMode,
+        )
+      ) {
+        patch.activeTool = config.activeTool as ToolMode;
+      }
+      if (typeof config.terrainExaggeration === 'number' && Number.isFinite(config.terrainExaggeration)) {
+        patch.terrainExaggeration = Math.max(0.1, Math.min(10, config.terrainExaggeration));
+      }
+      if (typeof config.pointBudget === 'number' && Number.isFinite(config.pointBudget)) {
+        patch.pointBudget = Math.max(100_000, Math.min(20_000_000, Math.floor(config.pointBudget)));
+      }
+      return patch as Partial<ViewerState>;
+    }),
+
   setLayerVisibility: (id, visible) =>
     set((state) => ({ layers: { ...state.layers, [id]: { ...state.layers[id], visible } } })),
 
@@ -479,6 +593,8 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   measurement: initialMeasurement,
   setMeasurement: (measurement) => set({ measurement }),
   clearMeasurement: () => set({ measurement: initialMeasurement }),
+  showMeshPreview: true,
+  setShowMeshPreview: (showMeshPreview) => set({ showMeshPreview }),
   recomputeVolume: async (viewer, opts) => {
     const m = get().measurement;
     // Guard rails: only run on a finished Volume polygon. The dropdown
@@ -502,6 +618,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
         volumeCubicMeters: result.netVol,
         volumeBreakdown: result,
         basePlane: opts.basePlane,
+        computedAt: Date.now(),
       },
     });
   },
@@ -600,31 +717,18 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     set({ profile: { samples: null, mode: 'profile', exaggeration: 1 } }),
 
   annotations: [],
+  setAnnotations: (annotations) => set({ annotations }),
   annotationDraft: { point: null },
   startAnnotationDraft: (point) => set({ annotationDraft: { point } }),
   cancelAnnotationDraft: () => set({ annotationDraft: { point: null } }),
-  addAnnotation: (text) =>
-    set((state) => {
-      const point = state.annotationDraft.point;
-      if (!point) return state;
-      const trimmed = text.trim();
-      if (!trimmed) return state;
-      const annotation: Annotation = {
-        id: makeAnnotationId(),
-        text: trimmed,
-        point,
-        createdAt: new Date().toISOString(),
-      };
-      return {
-        annotations: [...state.annotations, annotation],
-        annotationDraft: { point: null },
-      };
-    }),
-  removeAnnotation: (id) =>
-    set((state) => ({
-      annotations: state.annotations.filter((a) => a.id !== id),
-    })),
+
+  designOverlayGeoJSON: null,
+  setDesignOverlay: (geojson) => set({ designOverlayGeoJSON: geojson }),
 }));
+
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  (window as unknown as { __viewerStore?: unknown }).__viewerStore = useViewerStore;
+}
 
 /** Stable enough for client-side annotation IDs without a uuid dep. */
 function makeAnnotationId(): string {

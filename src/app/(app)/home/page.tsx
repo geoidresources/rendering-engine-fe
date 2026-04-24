@@ -1057,6 +1057,10 @@ function InventoryTrendCard({
   // needs ≥3 surveys to produce useful z-scores). We fall back to a 2-point
   // series built from survey-delta's latest+previous so the operator still
   // sees the real inventory move — not a placeholder pipeline chart.
+  // Capture once at mount. Days-to-depletion is a dashboard card — sub-day
+  // precision has no product value, and reading Date.now() during render is
+  // an impure call under the React 19 purity rule.
+  const [nowMs] = useState(() => Date.now());
   const { series, anomalies, daysToDepletion, seriesSource } = useMemo(() => {
     const base = points.map((p) => ({
       timestamp: p.created_at,
@@ -1077,10 +1081,10 @@ function InventoryTrendCard({
 
     if (depletionIso) {
       const depletionMs = Date.parse(depletionIso);
-      if (Number.isFinite(depletionMs) && depletionMs > Date.now()) {
+      if (Number.isFinite(depletionMs) && depletionMs > nowMs) {
         daysToDepletion = Math.max(
           0,
-          Math.round((depletionMs - Date.now()) / 86_400_000),
+          Math.round((depletionMs - nowMs) / 86_400_000),
         );
         const withSeed = base.map((p, i) =>
           i === base.length - 1 ? { ...p, forecast: p.value } : p,
@@ -1134,7 +1138,7 @@ function InventoryTrendCard({
       daysToDepletion,
       seriesSource: "temporal" as const,
     };
-  }, [points, surveyDelta]);
+  }, [points, surveyDelta, nowMs]);
 
   const showFallback = !loading && !error && series.length === 0;
 

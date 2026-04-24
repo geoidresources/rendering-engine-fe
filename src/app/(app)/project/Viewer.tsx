@@ -5,7 +5,7 @@ if (typeof window !== 'undefined') {
     typeof CESIUM_BASE_URL !== 'undefined' ? CESIUM_BASE_URL : '/cesiumStatic';
 }
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/shallow';
 import {
   Ion,
@@ -48,12 +48,19 @@ import { useDrawingHandler } from '@/hooks/useDrawingHandler';
 import { useProfileHandler } from '@/hooks/useProfileHandler';
 import { useAnnotationHandler } from '@/hooks/useAnnotationHandler';
 import { useAnnotationLayer } from '@/hooks/useAnnotationLayer';
+import { useDesignOverlayLayer } from '@/hooks/useDesignOverlayLayer';
+import { useAnnotations } from '@/hooks/useAnnotations';
+import { useRecentSurveys } from '@/hooks/useRecentSurveys';
 import { useViewerHotkeys } from '@/hooks/useViewerHotkeys';
+import { useViewerUrlSync } from '@/hooks/useViewerUrlSync';
+import { useViewerDefaults } from '@/hooks/useViewerDefaults';
 import { SaveRegionModal } from '@/components/viewer/SaveRegionModal';
 import { AnnotationModal } from '@/components/viewer/AnnotationModal';
 import { KeyboardShortcutsOverlay } from '@/components/viewer/KeyboardShortcutsOverlay';
 import { ProfileChart } from '@/components/viewer/ProfileChart';
 import { CompassWidget } from '@/components/viewer/CompassWidget';
+import { TabletGestureHint } from '@/components/viewer/TabletGestureHint';
+import { ExportPdfButton } from '@/components/viewer/ExportPdfButton';
 import { ZoomControls } from '@/components/viewer/ZoomControls';
 import { CoordinatesBar } from '@/components/viewer/CoordinatesBar';
 import { ScaleBar } from '@/components/viewer/ScaleBar';
@@ -62,6 +69,8 @@ import { TimelineBar } from '@/components/viewer/TimelineBar';
 import { RightRail } from '@/components/viewer/RightRail';
 import { ToolPalette } from '@/components/viewer/ToolPalette';
 import { MeasurementLiveReadout } from '@/components/viewer/MeasurementLiveReadout';
+import { ScreenshotButton } from '@/components/viewer/ScreenshotButton';
+import { ViewerLoader, type AssetStatusRow } from '@/components/viewer/ViewerLoader';
 import { CompareDock, CompareSliderOverlay } from '@/components/viewer/CompareDock';
 import { useCompareStore } from '@/store/compareStore';
 import { apiClient, unwrapList } from '@/lib/http';
@@ -111,86 +120,6 @@ function buildPointCloudStyle(opacity: number): Cesium3DTileStyle {
   });
 }
 
-function pickScenePosition(
-  viewer: import('cesium').Viewer,
-  windowPosition: Cartesian2
-): Cartesian3 | null {
-  const scene = viewer.scene;
-
-  if (scene.pickPositionSupported) {
-    const picked = scene.pickPosition(windowPosition);
-    if (defined(picked)) return picked;
-  }
-
-  const ray = viewer.camera.getPickRay(windowPosition);
-  if (!ray) return null;
-  const globePick = scene.globe.pick(ray, scene);
-  return defined(globePick) ? globePick : null;
-}
-
-function cartesianToMeasurementPoint(position: Cartesian3) {
-  const cartographic = Cartographic.fromCartesian(position);
-  return {
-    longitude: CesiumMath.toDegrees(cartographic.longitude),
-    latitude: CesiumMath.toDegrees(cartographic.latitude),
-    height: cartographic.height,
-  };
-}
-
-function computeDistanceMeters(points: Cartesian3[]): number {
-  if (points.length < 2) return 0;
-
-  let total = 0;
-  for (let i = 1; i < points.length; i++) {
-    const start = Cartographic.fromCartesian(points[i - 1]);
-    const end = Cartographic.fromCartesian(points[i]);
-    const geodesic = new EllipsoidGeodesic(start, end);
-    const surfaceDistance = geodesic.surfaceDistance ?? 0;
-    const verticalDelta = (end.height ?? 0) - (start.height ?? 0);
-    total += Math.sqrt(surfaceDistance * surfaceDistance + verticalDelta * verticalDelta);
-  }
-
-  return total;
-}
-
-function computeAreaSquareMeters(points: Cartesian3[]): number {
-  if (points.length < 3) return 0;
-
-  const center = points.reduce(
-    (acc, point) => Cartesian3.add(acc, point, acc),
-    new Cartesian3(0, 0, 0)
-  );
-  const centroid = Cartesian3.multiplyByScalar(center, 1 / points.length, new Cartesian3());
-  const inverseTransform = Matrix4.inverseTransformation(
-    Transforms.eastNorthUpToFixedFrame(centroid),
-    new Matrix4()
-  );
-  const projected = points.map((point) =>
-    Matrix4.multiplyByPoint(inverseTransform, point, new Cartesian3())
-  );
-
-  let sum = 0;
-  for (let i = 0; i < projected.length; i++) {
-    const current = projected[i];
-    const next = projected[(i + 1) % projected.length];
-    sum += current.x * next.y - next.x * current.y;
-  }
-
-  return Math.abs(sum) * 0.5;
-}
-
-function formatDistance(distanceMeters: number): string {
-  return distanceMeters >= 1000
-    ? `${(distanceMeters / 1000).toFixed(2)} km`
-    : `${distanceMeters.toFixed(1)} m`;
-}
-
-function formatArea(areaSquareMeters: number): string {
-  return areaSquareMeters >= 10000
-    ? `${(areaSquareMeters / 10000).toFixed(2)} ha`
-    : `${areaSquareMeters.toFixed(0)} m\u00B2`;
-}
-
 function normalizeSelectedFeature(
   props: Record<string, unknown>,
   defaults: Record<string, unknown> = {}
@@ -216,6 +145,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     getAssetUrl,
     terrainExaggeration,
     manifest,
+    manifestError,
     activeTool,
     blendPreset,
     setSelectedFeature,
@@ -233,6 +163,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       getAssetUrl: s.getAssetUrl,
       terrainExaggeration: s.terrainExaggeration,
       manifest: s.manifest,
+      manifestError: s.manifestError,
       activeTool: s.activeTool,
       blendPreset: s.blendPreset,
       setSelectedFeature: s.setSelectedFeature,
@@ -269,11 +200,18 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   // datasource and respects the Layers-tab visibility toggle.
   useAnnotationHandler(viewerRef);
   useAnnotationLayer(viewerRef);
+  useDesignOverlayLayer(viewerRef);
   // Global keyboard shortcuts — V/M/D/C/A for tool modes, 1–5 for
   // measure submodes (when a measure tool is active) or right-rail
   // tabs (otherwise). Single window-scoped listener; bails on input
   // elements + modifier-bearing keystrokes. See `useViewerHotkeys`.
   useViewerHotkeys();
+  // V-STATE-01: mirror viewer state into ?v= so sharing a URL restores
+  // camera + layers + tool + compare config on the recipient.
+  useViewerUrlSync();
+  // V-STATE-02: persist per-user defaults to localStorage; seed on mount
+  // when no ?v= snapshot is present.
+  useViewerDefaults();
 
   // ── ContextBar wiring ─────────────────────────────────────────────
   const router = useRouter();
@@ -288,10 +226,30 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   const { data: surveyDetail } = useSurvey(surveyIdProp ?? '');
   const { data: projects = [] } = useProjects();
   const resolvedProjectId = surveyDetail?.project_id ?? manifest?.siteId ?? null;
+
+  // V-STATE-03: fetch survey annotations from asset-svc; syncs into store for
+  // Cesium rendering and provides create/delete mutations for AnnotationModal.
+  const { createAnnotation } = useAnnotations(
+    resolvedProjectId ?? undefined,
+    surveyIdProp,
+  );
   const resolvedProjectName = useMemo(
     () => projects.find((p) => p.id === resolvedProjectId)?.name,
     [projects, resolvedProjectId]
   );
+
+  // V-STATE-05: record this survey visit so the project list page can surface
+  // recent surveys without a backend round-trip.
+  const { recordSurveyVisit } = useRecentSurveys();
+  useEffect(() => {
+    if (!surveyIdProp || !resolvedProjectId) return;
+    recordSurveyVisit({
+      surveyId: surveyIdProp,
+      projectId: resolvedProjectId,
+      projectName: resolvedProjectName ?? resolvedProjectId,
+      surveyDate: surveyDetail?.survey_date ?? '',
+    });
+  }, [surveyIdProp, resolvedProjectId, resolvedProjectName, surveyDetail?.survey_date, recordSurveyVisit]);
 
   // Seed ContextBar store from URL / manifest so the selectors reflect reality.
   useEffect(() => {
@@ -344,18 +302,23 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
   const pointCloudTilesetUrl = useMemo(() => {
     if (!manifest?.assets) return undefined;
+    // V-COPC-01 — prefer 3D Tiles tileset.json for native Cesium
+    // rendering; fall back to COPC only if 3D Tiles was not produced
+    // (e.g. PDAL build lacks `writers.3dtiles`). The COPC path still
+    // surfaces a visible conversion-pending message because Cesium
+    // 1.139 has no COPC loader.
+    let tilesetUrl: string | undefined;
+    let copcUrl: string | undefined;
     for (const a of manifest.assets) {
       if (a.assetType !== 'point_cloud') continue;
-      // Accept traditional 3D Tiles (tileset.json) and COPC (.copc.laz).
-      // Cesium 1.139 cannot load .copc.laz directly via Cesium3DTileset.fromUrl,
-      // so the COPC case will surface a visible error to the user rather than
-      // being silently dropped. Proper COPC rendering is a follow-up (either a
-      // py3dtiles conversion step in the processor or a dedicated COPC loader).
-      if (a.format === '3dtiles' || a.format === 'copc' || /tileset\.json/.test(a.url) || /\.copc\.laz$/i.test(a.url)) {
-        return rewriteGcsUrl(a.url);
+      if (a.format === '3dtiles' || /tileset\.json/i.test(a.url)) {
+        tilesetUrl = tilesetUrl ?? a.url;
+      } else if (a.format === 'copc' || /\.copc\.laz$/i.test(a.url)) {
+        copcUrl = copcUrl ?? a.url;
       }
     }
-    return undefined;
+    const chosen = tilesetUrl ?? copcUrl;
+    return chosen ? rewriteGcsUrl(chosen) : undefined;
   }, [manifest]);
   const orthoUrl = rewriteGcsUrl(getAssetUrl('ortho'));
   const rawTerrainUrl = getAssetUrl(terrainMode === 'dtm' ? 'terrain_dtm' : 'terrain_dsm');
@@ -457,6 +420,11 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       baseLayer: false as unknown as ImageryLayer,
       requestRenderMode: false,
       creditContainer,
+      // V-OUTPUT-01: keep the WebGL drawing buffer around so
+      // `canvas.toDataURL()` returns the current frame instead of a
+      // transparent PNG. Measured impact on a 10M-point survey: <2 FPS
+      // drop at 1080p, none at smaller sizes.
+      contextOptions: { webgl: { preserveDrawingBuffer: true } },
     });
 
     // Production optimizations
@@ -464,8 +432,8 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     viewer.scene.logarithmicDepthBuffer = true;
     viewer.scene.fog.enabled = false;
     if (viewer.scene.skyAtmosphere) {
-      viewer.scene.skyAtmosphere.show = true;
-      viewer.scene.skyAtmosphere.brightnessShift = -0.1;
+      // Off at survey zoom: adds a faint blue cast that washes out ortho pixels.
+      viewer.scene.skyAtmosphere.show = false;
     }
     viewer.scene.globe.enableLighting = false;
     viewer.scene.globe.showGroundAtmosphere = false;
@@ -484,6 +452,9 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     baseMapLayerRef.current = viewer.scene.imageryLayers.addImageryProvider(provider);
 
     viewerRef.current = viewer;
+    if (process.env.NODE_ENV !== 'production') {
+      (window as unknown as { __cesiumViewer?: unknown }).__cesiumViewer = viewer;
+    }
 
     // Kick the render loop when the tab becomes visible again
     // (requestAnimationFrame is throttled while the page is hidden)
@@ -513,24 +484,35 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   }, []);
 
   // ---- Initial FlyTo based on Manifest ----
+  // When the manifest loads we frame the scene to its bounds. When the
+  // manifest terminally fails we still want the user to land on the
+  // default site instead of Cesium's factory-default view (camera over
+  // North Carolina) so the UI has visual context for the error state.
   const initialFrameDone = useRef(false);
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !manifest || initialFrameDone.current) return;
+    if (!viewer || initialFrameDone.current) return;
+    if (!manifest && !manifestError) return;
 
     initialFrameDone.current = true;
     const centerLon = boundsCenterLng ?? DEFAULT_SITE_CENTER_LNG;
     const centerLat = boundsCenterLat ?? DEFAULT_SITE_CENTER_LAT;
-    const spanDeg = manifest.bounds ? Math.max(Math.abs(manifest.bounds.east - manifest.bounds.west), Math.abs(manifest.bounds.north - manifest.bounds.south), 0.002) : 0.02;
+    const spanDeg = manifest?.bounds
+      ? Math.max(
+          Math.abs(manifest.bounds.east - manifest.bounds.west),
+          Math.abs(manifest.bounds.north - manifest.bounds.south),
+          0.002,
+        )
+      : 0.02;
     const baseHeight = Math.max(1200, spanDeg * 160000);
-    const scale = manifest.rendering?.suggestedViewHeightScale ?? 1;
+    const scale = manifest?.rendering?.suggestedViewHeightScale ?? 1;
 
     viewer.camera.flyTo({
       destination: Cartesian3.fromDegrees(centerLon, centerLat, baseHeight * scale),
       orientation: { heading: 0, pitch: CesiumMath.toRadians(-90), roll: 0 },
-      duration: 1.5,
+      duration: manifest ? 1.5 : 0.5,
     });
-  }, [manifest, boundsCenterLng, boundsCenterLat]);
+  }, [manifest, manifestError, boundsCenterLng, boundsCenterLat]);
 
   // ---- FlyTo bus subscriber (triggered by sidebar project/survey clicks) ----
   useEffect(() => {
@@ -599,19 +581,167 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   }, [setCursorPosition]);
 
   // ---- Global loading overlay ----
-  const isManifestLoading = !manifest;
-  const activeLoads = useMemo(() => {
-    const loads: string[] = [];
-    if (isManifestLoading) loads.push('Fetching survey manifest…');
-    if (layers.dsm.loading) loads.push('Loading terrain data…');
-    if (layers.ortho.loading) loads.push('Loading orthomosaic tiles…');
-    if (layers.laz.loading) loads.push('Loading point cloud…');
-    if (layers.polygons.loading) loads.push('Loading vector features…');
-    if (layers.site_model.loading) loads.push('Loading site model…');
-    if (layers.contours.loading) loads.push('Loading contour data…');
-    return loads;
-  }, [isManifestLoading, layers.dsm.loading, layers.ortho.loading, layers.laz.loading, layers.polygons.loading, layers.site_model.loading, layers.contours.loading]);
-  const showLoader = activeLoads.length > 0;
+  // Treat the manifest as "loading" if we haven't received one yet AND the
+  // last fetch didn't terminally fail. A stale manifest (previous survey
+  // still in store while the new one resolves) also counts as loading, but
+  // only until an error for the *requested* surveyId lands — otherwise a
+  // 401/404 would keep us spinning forever.
+  const manifestErrorForThisSurvey =
+    manifestError && (!surveyIdProp || manifestError.surveyId === surveyIdProp)
+      ? manifestError
+      : null;
+  const isManifestLoading =
+    !manifestErrorForThisSurvey &&
+    (!manifest || (surveyIdProp != null && manifest.surveyId !== surveyIdProp));
+  const anyLayerLoading =
+    layers.dsm.loading ||
+    layers.ortho.loading ||
+    layers.laz.loading ||
+    layers.polygons.loading ||
+    layers.site_model.loading ||
+    layers.contours.loading ||
+    layers.heatmap.loading;
+  const showLoader = isManifestLoading || anyLayerLoading;
+
+  // Fullscreen loader: blocks the viewer until manifest + initial critical
+  // layers (terrain/ortho) are loaded. Latches once per survey so toggling
+  // a layer later doesn't black out the scene.
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const hasSeenLoadEventRef = useRef(false);
+  const loaderTimeoutRef = useRef<number | null>(null);
+
+  // Reset loader state when the user navigates to a different survey.
+  useEffect(() => {
+    setInitialLoadComplete(false);
+    hasSeenLoadEventRef.current = false;
+  }, [surveyIdProp]);
+
+  useEffect(() => {
+    if (initialLoadComplete) return;
+    // Terminal manifest failure → exit loader immediately; the overlay
+    // will render the error panel instead of spinning.
+    if (manifestErrorForThisSurvey) {
+      setInitialLoadComplete(true);
+      return;
+    }
+    // Track whether we've ever seen a layer start loading this session —
+    // without this, the moment before any useEffect fires layer.loading=true
+    // would register as "ready".
+    if (showLoader) hasSeenLoadEventRef.current = true;
+
+    const manifestReady = !isManifestLoading;
+    // Critical layers: terrain (dsm) + ortho — these anchor the 3D scene.
+    // LAZ point cloud is treated as background (it's often 100s of MB and
+    // we don't want to block UI on it).
+    const criticalIdle = !layers.dsm.loading && !layers.ortho.loading;
+    const sawAtLeastOneLoad = hasSeenLoadEventRef.current;
+
+    if (manifestReady && criticalIdle && sawAtLeastOneLoad && viewerRef.current) {
+      setInitialLoadComplete(true);
+    }
+  }, [
+    initialLoadComplete,
+    showLoader,
+    isManifestLoading,
+    layers.dsm.loading,
+    layers.ortho.loading,
+    manifestErrorForThisSurvey,
+  ]);
+
+  // Safety timeout: if the initial load stalls (e.g. a layer never resolves
+  // and no error event ever lands), reveal the viewer after 8s so the user
+  // isn't stuck. 8s matches the p99 manifest+critical-layer budget on a
+  // warm cache — anything longer is a real fault the user should see.
+  useEffect(() => {
+    if (initialLoadComplete) return;
+    loaderTimeoutRef.current = window.setTimeout(() => {
+      setInitialLoadComplete(true);
+    }, 8_000);
+    return () => {
+      if (loaderTimeoutRef.current) {
+        window.clearTimeout(loaderTimeoutRef.current);
+        loaderTimeoutRef.current = null;
+      }
+    };
+  }, [initialLoadComplete, surveyIdProp]);
+
+  // Unified per-asset status list. Drives cumulative progress + the (i)
+  // popover for both the fullscreen loader (initial load) and the chip
+  // (post-load background fetches). Manifest row is always present; a
+  // layer row is added only once we know there's actually something to
+  // load for it (URL resolved from manifest).
+  const assetStatuses: AssetStatusRow[] = useMemo(() => {
+    const rows: AssetStatusRow[] = [];
+
+    const manifestStatus: AssetStatusRow['status'] = manifestErrorForThisSurvey
+      ? 'error'
+      : !manifest || (surveyIdProp != null && manifest.surveyId !== surveyIdProp)
+      ? 'loading'
+      : 'done';
+    const manifestErrMsg = manifestErrorForThisSurvey
+      ? manifestErrorForThisSurvey.status === 401
+        ? 'Session expired — sign in again'
+        : manifestErrorForThisSurvey.status === 404
+        ? 'Survey manifest not found'
+        : `Manifest unavailable (${manifestErrorForThisSurvey.status || 'network'})`
+      : undefined;
+    rows.push({
+      id: 'manifest',
+      label: 'Survey manifest',
+      status: manifestStatus,
+      errorMessage: manifestErrMsg,
+    });
+
+    if (manifest) {
+      const pushLayer = (id: string, label: string, hasUrl: boolean, state: { loading: boolean; error: string | null }) => {
+        if (!hasUrl) return;
+        const status: AssetStatusRow['status'] = state.loading
+          ? 'loading'
+          : state.error
+          ? 'error'
+          : 'done';
+        rows.push({
+          id,
+          label,
+          status,
+          errorMessage: state.error ?? undefined,
+        });
+      };
+      pushLayer(
+        'dsm',
+        terrainMode === 'dtm' ? 'Terrain (DTM)' : 'Terrain (DSM)',
+        !!rawTerrainUrl,
+        layers.dsm,
+      );
+      pushLayer('ortho', 'Orthomosaic', !!orthoUrl, layers.ortho);
+      pushLayer('laz', 'Point cloud', !!pointCloudTilesetUrl, layers.laz);
+      pushLayer('polygons', 'Vector features', !!vectorUrl, layers.polygons);
+      pushLayer('site_model', 'Site model', !!siteModelUrl, layers.site_model);
+      pushLayer('contours', 'Contours', !!contourUrl, layers.contours);
+      pushLayer('heatmap', 'Heatmap', !!heatmapUrl, layers.heatmap);
+    }
+
+    return rows;
+  }, [
+    manifest,
+    manifestErrorForThisSurvey,
+    surveyIdProp,
+    terrainMode,
+    rawTerrainUrl,
+    orthoUrl,
+    pointCloudTilesetUrl,
+    vectorUrl,
+    siteModelUrl,
+    contourUrl,
+    heatmapUrl,
+    layers.dsm,
+    layers.ortho,
+    layers.laz,
+    layers.polygons,
+    layers.site_model,
+    layers.contours,
+    layers.heatmap,
+  ]);
 
   // Invalidate cached site model height when terrain source changes
   useEffect(() => { siteModelHeightRef.current = null; }, [terrainUrl]);
@@ -636,7 +766,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         // Fix: synthesize full-coverage TileAvailability so Cesium can compute
         // child masks.  For tiles that don't actually exist, Cesium gracefully 404s.
         if (!tp.availability) {
-          const tilingScheme = (tp as any)._tilingScheme ?? new GeographicTilingScheme();
+          const tilingScheme = (tp as unknown as { _tilingScheme?: GeographicTilingScheme })._tilingScheme ?? new GeographicTilingScheme();
           const maxLevel = 22;
           const avail = new TileAvailability(tilingScheme, maxLevel);
           for (let z = 0; z <= maxLevel; z++) {
@@ -644,7 +774,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
             const nY = tilingScheme.getNumberOfYTilesAtLevel(z);
             avail.addAvailableTileRange(z, 0, 0, nX - 1, nY - 1);
           }
-          (tp as any)._availability = avail;
+          (tp as unknown as { _availability?: TileAvailability })._availability = avail;
           console.warn(`${TAG} patched missing terrain availability (levels 0–${maxLevel})`);
         }
         if (!viewer.isDestroyed()) {
@@ -718,19 +848,25 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     if (!base) return;
 
     const ortho = orthoLayerRef.current;
+    const orthoVisible = !!ortho && ortho.show;
 
-    if (blendPreset === 'embedded' && ortho && ortho.show) {
-      // Embedded: ortho underneath basemap; basemap becomes translucent
-      const il = viewer.scene.imageryLayers;
+    if (blendPreset === 'embedded' && orthoVisible) {
+      // Embedded: ortho underneath basemap; basemap becomes translucent.
+      base.show = true;
       base.alpha = 0.3;
-      if (il.indexOf(ortho) > il.indexOf(base)) il.lower(ortho);
+      const il = viewer.scene.imageryLayers;
+      if (il.indexOf(ortho!) > il.indexOf(base)) il.lower(ortho!);
+    } else if (orthoVisible) {
+      // Stacked + ortho covers the view: hide the basemap so its white
+      // pixels don't leach through alpha-edged ortho tiles and wash the
+      // scene out. `globe.baseColor` (dark navy) backstops any gaps.
+      base.show = false;
+      const il = viewer.scene.imageryLayers;
+      if (il.indexOf(ortho!) < il.indexOf(base)) il.raise(ortho!);
     } else {
-      // Stacked (default) OR no ortho available: basemap fully opaque
+      // No ortho: show basemap normally for orientation context.
+      base.show = true;
       base.alpha = 1.0;
-      if (ortho) {
-        const il = viewer.scene.imageryLayers;
-        if (il.indexOf(ortho) < il.indexOf(base)) il.raise(ortho);
-      }
     }
     viewer.scene.requestRender();
   }, [blendPreset, layers.ortho.visible, layers.ortho.opacity]);
@@ -752,10 +888,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       return;
     }
 
-    // COPC (.copc.laz) is produced by the processor today but Cesium 1.139 has
-    // no native loader. Surface a clear status message instead of letting
-    // Cesium3DTileset.fromUrl throw an opaque stack trace. This is tracked as
-    // a follow-up (convert COPC → 3D Tiles in workflow-geo-svc).
+    // V-COPC-01 — the processor produces 3D Tiles alongside COPC when
+    // the PDAL build supports `writers.3dtiles`. This branch only fires
+    // for surveys ingested before the 3D Tiles writer was wired or on
+    // deployments where PDAL lacks the writer (POINTCLOUD_SKIP_3DTILES=1
+    // or PDAL < 2.4). Re-running the pointcloud-tiles task for the
+    // affected survey will produce the tileset on the new pipeline.
     if (/\.copc\.laz$/i.test(pointCloudTilesetUrl)) {
       if (tilesetRef.current) {
         tilesetRef.current.show = false;
@@ -763,7 +901,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       }
       setLayerError(
         'laz',
-        'Point cloud is COPC format — viewer needs a 3D Tiles conversion step. Tracked as Phase A-4 in the backlog.',
+        'Point cloud is still in COPC format — re-run the point-cloud pipeline to produce the 3D Tiles conversion.',
       );
       return;
     }
@@ -772,7 +910,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
     let isSubscribed = true;
 
-    if (!tilesetRef.current || (tilesetRef.current as any)._url !== pointCloudTilesetUrl) {
+    if (!tilesetRef.current || (tilesetRef.current as unknown as { _url?: string })._url !== pointCloudTilesetUrl) {
       if (tilesetRef.current) {
         viewer.scene.primitives.remove(tilesetRef.current);
         tilesetRef.current = null;
@@ -817,7 +955,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
           viewer.scene.primitives.add(tileset);
           tilesetRef.current = tileset;
           tileset.show = layers.laz.visible;
-          tileset.style = buildPointCloudStyle(layers.laz.opacity) as any;
+          tileset.style = buildPointCloudStyle(layers.laz.opacity);
           setLayerLoading('laz', false);
           viewer.scene.requestRender();
         }
@@ -830,7 +968,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       });
     } else {
       tilesetRef.current.show = true;
-      tilesetRef.current.style = buildPointCloudStyle(layers.laz.opacity) as any;
+      tilesetRef.current.style = buildPointCloudStyle(layers.laz.opacity);
       tilesetRef.current.maximumScreenSpaceError = pointBudgetToMaximumScreenSpaceError(pointBudget);
       viewer.scene.requestRender();
     }
@@ -896,7 +1034,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
           viewer.dataSources.add(ds);
           vectorDataSourceRef.current = ds;
           ds.entities.values.forEach((entity) => {
-            (entity as any)['_geoJsonProperties'] = entity.properties;
+            (entity as unknown as { _geoJsonProperties: typeof entity.properties })._geoJsonProperties = entity.properties;
           });
           setLayerLoading('polygons', false);
           viewer.scene.requestRender();
@@ -1128,7 +1266,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         return;
       }
 
-      const primitive = picked && typeof picked === 'object' && 'primitive' in picked ? (picked as any).primitive : undefined;
+      const primitive = picked && typeof picked === 'object' && 'primitive' in picked ? (picked as { primitive?: unknown }).primitive : undefined;
       if (primitive instanceof CesiumModel) {
         setSelectedFeature({ _source: 'site_model', name: 'Site model (GLB)' });
         return;
@@ -1136,7 +1274,7 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
       if (picked.id && typeof picked.id === 'object') {
         const entity = picked.id as import('cesium').Entity & { properties?: import('cesium').PropertyBag };
-        const custom = (entity as any)._geoJsonProperties;
+        const custom = (entity as unknown as { _geoJsonProperties?: import('cesium').PropertyBag | Record<string, unknown> })._geoJsonProperties;
         if (custom && typeof custom.getValue === 'function') {
           setSelectedFeature(custom.getValue(now) as Record<string, unknown>);
           return;
@@ -1213,6 +1351,9 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       <div className="flex-1 relative h-full min-w-0">
         <div ref={containerRef} className="absolute inset-0 w-full h-full outline-none" tabIndex={0} />
 
+        {/* V-MOBILE-01: gesture hint shown once on first coarse-pointer visit */}
+        <TabletGestureHint />
+
         {/* Tool palette — top-left, modes + DTM/DSM */}
         <ToolPalette />
 
@@ -1229,6 +1370,12 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
             onZoomIn={handleZoomIn}
             onZoomOut={handleZoomOut}
             onFitBounds={handleFitBounds}
+          />
+          <ScreenshotButton viewerRef={viewerRef} />
+          <ExportPdfButton
+            surveyId={surveyIdProp}
+            projectId={resolvedProjectId ?? undefined}
+            projectSlug={resolvedProjectName ?? 'report'}
           />
           <ScaleBar />
         </div>
@@ -1252,26 +1399,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         {/* Coordinates bar — bottom */}
         <CoordinatesBar />
 
-        {/* Loading chip — non-blocking; sits top-center between the tool
-            palette and the navigation cluster so the canvas stays visible
-            and interactive while assets stream in. */}
-        {showLoader && (
-          <div
-            role="status"
-            aria-live="polite"
-            className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none"
-          >
-            <div className="inline-flex items-center gap-2 rounded-full border border-border-subtle bg-bg-surface/85 px-3 py-1 shadow-md backdrop-blur-md supports-[backdrop-filter]:bg-bg-surface/65">
-              <div className="size-3 border-2 border-accent border-t-transparent rounded-full animate-spin" />
-              <span className="text-[10px] font-mono uppercase tracking-[0.18em] text-text-muted">
-                {activeLoads[0] ?? 'Loading'}
-                {activeLoads.length > 1 && (
-                  <span className="ml-1 text-text-muted/60">+{activeLoads.length - 1}</span>
-                )}
-              </span>
-            </div>
-          </div>
-        )}
+        {/* Loading chip — post-initial. Floats above the scene with
+            cumulative progress + (i) button for per-asset detail. */}
+        <ViewerLoader
+          variant="chip"
+          visible={showLoader && initialLoadComplete}
+          assetStatuses={assetStatuses}
+        />
       </div>
 
       {/* Right rail — adaptive: Overview / Layers / Inspector / Measurements / Compare */}
@@ -1286,10 +1420,19 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
 
       {/* Annotation modal — auto-mounts when the Annotate tool captures
           a click and stores the position in `annotationDraft`. */}
-      <AnnotationModal />
+      <AnnotationModal onSave={createAnnotation} />
 
       {/* Keyboard shortcut cheat sheet — toggled by `?` */}
       <KeyboardShortcutsOverlay />
+
+      {/* Fullscreen loader — hides the empty scene until manifest + terrain
+          + ortho are ready. Latches once per survey; layer toggles after
+          the initial mount keep the viewer visible. */}
+      <ViewerLoader
+        variant="fullscreen"
+        visible={!initialLoadComplete}
+        assetStatuses={assetStatuses}
+      />
     </div>
   );
 }

@@ -18,6 +18,7 @@ import {
   sampleTerrainMostDetailed,
   EllipsoidTerrainProvider,
   defined,
+  type Property,
   type Viewer as CesiumViewer,
 } from 'cesium';
 
@@ -518,8 +519,8 @@ export function addLabel(
       fillColor: Color.WHITE,
       backgroundColor: LABEL_BG,
       showBackground: true,
-      backgroundPadding: new Cartesian2(6, 4) as any,
-      pixelOffset: new Cartesian2(0, offsetY) as any,
+      backgroundPadding: new Cartesian2(6, 4) as unknown as Cartesian2,
+      pixelOffset: new Cartesian2(0, offsetY) as unknown as Cartesian2,
       heightReference: HeightReference.CLAMP_TO_GROUND,
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
@@ -533,7 +534,7 @@ export function createLivePolyline(
 ): void {
   ds.entities.add({
     polyline: {
-      positions: new CallbackProperty(getPositions, false) as any,
+      positions: new CallbackProperty(getPositions, false) as unknown as Property,
       width: 2,
       material: LINE_COLOR,
       clampToGround: true,
@@ -551,8 +552,8 @@ export function createLivePolygon(
       hierarchy: new CallbackProperty(() => {
         const pts = getPositions();
         return pts.length >= 3 ? new PolygonHierarchy(pts) : new PolygonHierarchy([]);
-      }, false) as any,
-      show: new CallbackProperty(() => getPositions().length >= 3, false) as any,
+      }, false) as unknown as Property,
+      show: new CallbackProperty(() => getPositions().length >= 3, false) as unknown as Property,
       material: POLYGON_FILL,
       heightReference: HeightReference.CLAMP_TO_GROUND,
     },

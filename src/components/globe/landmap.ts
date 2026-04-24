@@ -32,15 +32,25 @@ export async function buildLandCanvas(): Promise<ImageData> {
     }
   };
 
-  const geom = (land as any).geometry ?? (land as any).features?.[0]?.geometry;
+  type Ring = number[][];
+  type Poly = Ring[];
+  type Geom =
+    | { type: "MultiPolygon"; coordinates: Poly[] }
+    | { type: "Polygon"; coordinates: Poly };
+  type LandShape = {
+    geometry?: Geom;
+    features?: { geometry: Geom }[];
+  };
+  const shape = land as unknown as LandShape;
+  const geom = shape.geometry ?? shape.features?.[0]?.geometry;
   if (geom?.type === "MultiPolygon") {
     for (const poly of geom.coordinates) drawRings(poly);
   } else if (geom?.type === "Polygon") {
     drawRings(geom.coordinates);
   }
   // FeatureCollection path
-  if ((land as any).features) {
-    for (const feat of (land as any).features) {
+  if (shape.features) {
+    for (const feat of shape.features) {
       const g = feat.geometry;
       if (g.type === "MultiPolygon") for (const p of g.coordinates) drawRings(p);
       else if (g.type === "Polygon") drawRings(g.coordinates);

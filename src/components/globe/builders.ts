@@ -177,7 +177,7 @@ export function buildArcs(globe: THREE.Group, landVecs: THREE.Vector3[]) {
     depthWrite:  false,
   });
   for (let i = 0; i < ARC_COUNT; i++) {
-    let a     = Math.floor(Math.random() * landVecs.length);
+    const a   = Math.floor(Math.random() * landVecs.length);
     let b     = Math.floor(Math.random() * landVecs.length);
     let tries = 0;
     while (landVecs[a].distanceTo(landVecs[b]) < 0.8 && tries++ < 30) {
@@ -236,7 +236,7 @@ export function buildSiteMarkers(
           new THREE.SphereGeometry(0.014, 12, 12),
           new THREE.MeshBasicMaterial({ color: COL.marker }),
         ),
-        { position: mPos } as any,
+        { position: mPos } as unknown as Partial<THREE.Mesh>,
       ),
     );
 
@@ -255,7 +255,7 @@ export function buildSiteMarkers(
       );
       ring.position.copy(mPos);
       ring.lookAt(new THREE.Vector3(0, 0, 0));
-      (ring as any).__phase = (k / 3) * Math.PI * 2;
+      (ring as unknown as { __phase: number }).__phase = (k / 3) * Math.PI * 2;
       globe.add(ring);
       pulseRings.push(ring);
     }

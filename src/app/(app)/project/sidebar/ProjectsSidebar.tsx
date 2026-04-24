@@ -74,6 +74,14 @@ export function ProjectsSidebar() {
   };
 
   const handleSurveyClick = async (survey: Survey) => {
+    // Warm the expensive caches in parallel with the globe flyTo animation
+    // so the Viewer has less work to do once it actually mounts:
+    //   1. Prefetch the Cesium-heavy Viewer bundle (~4 MB).
+    //   2. Kick off the manifest fetch so it's already in flight by the
+    //      time Viewer.tsx runs its own loadManifest effect.
+    import('@/app/(app)/project/Viewer').catch(() => {});
+    useViewerStore.getState().loadManifest(survey.id).catch(() => {});
+
     await flyToSurvey(survey);
     router.push(`/project?surveyId=${survey.id}`);
   };

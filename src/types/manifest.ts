@@ -37,6 +37,11 @@ export interface Asset {
   zRange?: number[];
   name?: string;
   role?: string;
+  /** V-TRUST-01 — per-survey terrain RMSE (metres, vertical). Feeds the
+   *  volume card's ± 95 % CI band when set; falls back to the env-driven
+   *  default in `lib/viewer/terrainRmse.ts` when omitted. Populated by
+   *  asset-svc once the Sprint-2 BE migration lands. */
+  rmse_m?: number;
 }
 
 export interface Bounds {

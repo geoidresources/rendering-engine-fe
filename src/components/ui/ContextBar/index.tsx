@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Bell, Search, MapPin, Calendar, Layers3, Columns2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +29,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import StatusChip from "@/components/ui/StatusChip";
+import { WorkspacePresetPicker } from "@/components/viewer/WorkspacePresetPicker";
 import { useSiteStore, type ViewMode } from "@/store/siteStore";
 import { useCompareStore } from "@/store/compareStore";
 import { useProjects } from "@/hooks/useProjects";
@@ -68,6 +69,8 @@ const VIEW_MODES: { id: ViewMode; label: string; icon: React.ComponentType<{ cla
  */
 export default function ContextBar({ onCommand }: ContextBarProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  const isViewerRoute = pathname?.startsWith("/project") ?? false;
   const { data: projects = [] } = useProjects();
 
   const activeProjectId = useSiteStore((s) => s.activeProjectId);
@@ -207,6 +210,14 @@ export default function ContextBar({ onCommand }: ContextBarProps) {
           >
             {activeSurvey.status}
           </StatusChip>
+        )}
+
+        {/* Workspace preset picker — viewer-only (V-TASK-01) */}
+        {isViewerRoute && (
+          <>
+            <span className="text-text-muted text-xs">/</span>
+            <WorkspacePresetPicker />
+          </>
         )}
 
         <div className="flex-1" />

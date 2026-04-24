@@ -33,6 +33,8 @@ export interface CreateMeasurementBody {
   properties?: Record<string, unknown>;
 }
 
+export type QAStatus = 'approved' | 'pending' | 'rejected';
+
 export interface MeasurementResponse {
   id: string;
   client_id: string;
@@ -43,6 +45,12 @@ export interface MeasurementResponse {
   properties?: Record<string, unknown>;
   latest_survey_id?: string;
   is_locked: boolean;
+  qa_status?: QAStatus;
+  // V-TRUST-06 provenance fields (migration 020)
+  computed_at?: string;
+  terrain_mode?: 'dsm' | 'dtm';
+  base_plane_method?: 'avg' | 'fitted' | 'min' | 'max';
+  sample_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -83,6 +91,24 @@ export function useCreateMeasurement(projectId: string | null | undefined) {
       const res = await assetSvcClient.post<MeasurementResponse, CreateMeasurementBody>(
         '/asset-svc/api/v1/measurements/',
         body,
+      );
+      return res.data;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['measurements', 'list', projectId] });
+      qc.invalidateQueries({ queryKey: ['analytics', 'stockpiles'] });
+    },
+  });
+}
+
+export function useRecomputeMeasurement(projectId: string | null | undefined) {
+  const qc = useQueryClient();
+  return useMutation<MeasurementResponse, Error, string>({
+    mutationKey: ['measurements', 'recompute', projectId],
+    mutationFn: async (id) => {
+      const res = await assetSvcClient.post<MeasurementResponse>(
+        `/asset-svc/api/v1/measurements/${id}/recompute`,
+        {},
       );
       return res.data;
     },

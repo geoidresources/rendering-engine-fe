@@ -11,6 +11,7 @@ import {
   Cartesian2,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
+  type Entity,
   type Viewer as CesiumViewer,
 } from 'cesium';
 import { useViewerStore } from '../store/viewerStore';
@@ -30,6 +31,8 @@ import {
   createLivePolyline,
   createLivePolygon,
 } from '../lib/cesium/measurementPrimitives';
+import { buildExtrudedStockpileEntity } from '../lib/cesium/stockpilePreviewPrimitive';
+import { materialColor } from '../lib/cesium/materialColor';
 
 export function useMeasurementHandler(
   viewerRef: React.RefObject<CesiumViewer | null>,
@@ -43,6 +46,11 @@ export function useMeasurementHandler(
   const cursorRef = useRef<Cartesian3 | null>(null);
   const isDrawingRef = useRef(false);
   const handlerRef = useRef<ScreenSpaceEventHandler | null>(null);
+  // 3D extruded-prism preview for the Volume tool. Tracked so we can
+  // remove/replace it on base-plane change, tool switch, or toggle-off.
+  const previewEntityRef = useRef<Entity | null>(null);
+
+  const showMeshPreview = useViewerStore((s) => s.showMeshPreview);
 
   // ---- Main effect: set up drawing handlers when tool is active ----
   useEffect(() => {
@@ -69,6 +77,7 @@ export function useMeasurementHandler(
     verticesRef.current = [];
     cursorRef.current = null;
     isDrawingRef.current = false;
+    previewEntityRef.current = null;
     clearMeasurementEntities(viewer);
     clearMeasurement();
 
@@ -230,7 +239,10 @@ export function useMeasurementHandler(
             volumeCubicMeters: result.netVol,
             volumeBreakdown: result,
             basePlane: 'avg',
+            computedAt: Date.now(),
           });
+          // The dedicated preview effect below reacts to this state write
+          // and mounts / refreshes the extruded prism.
         } else {
           setMeasurement({
             tool: 'area',
@@ -266,8 +278,75 @@ export function useMeasurementHandler(
       verticesRef.current = [];
       cursorRef.current = null;
       isDrawingRef.current = false;
+      previewEntityRef.current = null;
     }
   }, [measurement.status, measurement.tool, viewerRef]);
+
+  // ---- Keep the extruded-prism preview in sync with the measurement.
+  // Rebuilds whenever `volumeBreakdown`, `basePlane`, or the show-preview
+  // toggle changes. The effect is the single source of truth *after* the
+  // initial mount inside finishDrawing — handy because `recomputeVolume`
+  // mutates the store from outside this hook (base-plane dropdown).
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const ds = getOrCreateDataSource(viewer);
+
+    const removePreview = () => {
+      if (previewEntityRef.current) {
+        ds.entities.remove(previewEntityRef.current);
+        previewEntityRef.current = null;
+        viewer.scene.requestRender();
+      }
+    };
+
+    if (!showMeshPreview) {
+      removePreview();
+      return;
+    }
+    if (
+      measurement.tool !== 'volume' ||
+      measurement.status !== 'complete' ||
+      !measurement.volumeBreakdown ||
+      measurement.points.length < 3
+    ) {
+      removePreview();
+      return;
+    }
+    const area = measurement.areaSquareMeters ?? 0;
+    const netVol = measurement.volumeBreakdown.netVol;
+    if (area <= 0 || netVol <= 0) {
+      removePreview();
+      return;
+    }
+
+    const verts = measurement.points.map((p) =>
+      Cartesian3.fromDegrees(p.longitude, p.latitude, p.height),
+    );
+    const meanH = netVol / area;
+
+    removePreview();
+    previewEntityRef.current = ds.entities.add(
+      buildExtrudedStockpileEntity({
+        id: `stockpile-preview-${measurement.computedAt ?? Date.now()}`,
+        vertices: verts,
+        baseHeight: measurement.volumeBreakdown.baseElevation,
+        topHeight: measurement.volumeBreakdown.baseElevation + meanH,
+        color: materialColor(undefined),
+      }),
+    );
+    viewer.scene.requestRender();
+  }, [
+    showMeshPreview,
+    measurement.tool,
+    measurement.status,
+    measurement.volumeBreakdown,
+    measurement.basePlane,
+    measurement.computedAt,
+    measurement.areaSquareMeters,
+    measurement.points,
+    viewerRef,
+  ]);
 
   // ---- Public API ----
   const clearDrawing = useCallback(() => {

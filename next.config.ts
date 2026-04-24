@@ -10,6 +10,10 @@ const publicCesiumDir = path.resolve("public", cesiumBaseUrl);
 const nextConfig: NextConfig = {
   reactStrictMode: false,
   reactCompiler: false,
+  // Lets a secondary dev instance use e.g. `.next-preview/` so Claude Code's
+  // preview server can coexist with the user's own `pnpm dev` on :3000
+  // without fighting over `.next/trace` locks.
+  distDir: process.env.NEXT_DIST_DIR ?? ".next",
   // Do NOT use transpilePackages for cesium or resium (pnpm + CJS/ESM issues).
   async rewrites() {
     return [
@@ -17,7 +21,7 @@ const nextConfig: NextConfig = {
       // needs cross-origin calls and CORS headers become irrelevant.
       {
         source: "/api/v1/:path*",
-        destination: `${process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080"}/api/v1/:path*`,
+        destination: `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8080"}/api/v1/:path*`,
       },
     ];
   },

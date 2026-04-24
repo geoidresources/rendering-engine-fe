@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import FileUpload, { type FileUploadHandle } from "@/components/ui/FileUpload";
 import { Badge } from "@/components/ui/badge";
@@ -68,20 +68,22 @@ export default function SurveyUploadPage() {
   const { startIngestion, isIngesting } = useIngestPipeline();
   const fileUploadRef = useRef<FileUploadHandle>(null);
 
-  // Auto-select first project
-  useEffect(() => {
-    if (!selectedProjectId && projects?.length) {
-      setSelectedProjectId(projects[0].id);
-    }
-  }, [selectedProjectId, projects]);
+  // Auto-select first project once the project list arrives. React 19
+  // purity rule forbids setState-in-effect, so we adjust state during
+  // render using the "remember last applied" pattern.
+  const [autoSelected, setAutoSelected] = useState(false);
+  if (!autoSelected && !selectedProjectId && projects?.length) {
+    setAutoSelected(true);
+    setSelectedProjectId(projects[0].id);
+  }
 
-  // Auto-set CRS from project settings
-  useEffect(() => {
-    if (selectedProjectId && projects) {
-      const proj = projects.find((p) => p.id === selectedProjectId);
-      if (proj?.settings?.crs) setCrs(proj.settings.crs);
-    }
-  }, [selectedProjectId, projects]);
+  // Mirror the project's CRS into the form whenever the selection changes.
+  const [crsSyncedFor, setCrsSyncedFor] = useState("");
+  if (selectedProjectId && projects && selectedProjectId !== crsSyncedFor) {
+    setCrsSyncedFor(selectedProjectId);
+    const proj = projects.find((p) => p.id === selectedProjectId);
+    if (proj?.settings?.crs) setCrs(proj.settings.crs);
+  }
 
   const handleUpload = async () => {
     if (!selectedProjectId) {

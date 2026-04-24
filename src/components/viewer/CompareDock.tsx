@@ -433,9 +433,11 @@ export const CompareSliderOverlay: React.FC = () => {
   const pct = `${(splitPosition * 100).toFixed(1)}%`;
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.buttons !== 1) return;
+    // For mouse, only move while button is held. For touch/stylus, the finger
+    // being down is the equivalent — pointerType distinguishes them.
+    if (e.pointerType === 'mouse' && e.buttons !== 1) return;
     const rect = (e.currentTarget.parentElement as HTMLDivElement).getBoundingClientRect();
-    setSplitPosition((e.clientX - rect.left) / rect.width);
+    setSplitPosition(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)));
   };
 
   return (
@@ -443,13 +445,14 @@ export const CompareSliderOverlay: React.FC = () => {
       className="absolute inset-0 z-10 pointer-events-none"
       aria-hidden="true"
     >
-      {/* Drag-capture surface — intercepts pointer move only while button held */}
+      {/* Drag-capture surface — intercepts pointer move only while button/finger held.
+          touch-action:none prevents the browser scrolling the page while swiping the slider. */}
       <div
         className="absolute inset-0 pointer-events-auto cursor-col-resize select-none"
         onPointerMove={onPointerMove}
         onPointerDown={(e) => (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)}
         onPointerUp={(e) => (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)}
-        style={{ background: 'transparent' }}
+        style={{ background: 'transparent', touchAction: 'none' }}
       />
 
       {/* Vertical divider line */}

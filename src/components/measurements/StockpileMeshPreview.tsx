@@ -17,51 +17,20 @@ import {
   UrlTemplateImageryProvider,
   Cartesian3,
   Color,
-  ColorMaterialProperty,
   Rectangle,
   Math as CesiumMath,
-  PolygonHierarchy,
   ImageryLayer,
   Model as CesiumModel,
   HeadingPitchRange,
 } from "cesium";
 import type { MeasurementInventoryItem } from "@/types/api";
+import { materialColor } from "@/lib/cesium/materialColor";
+import { buildExtrudedStockpileEntity } from "@/lib/cesium/stockpilePreviewPrimitive";
 
 Ion.defaultAccessToken = "";
 
 interface Props {
   item: MeasurementInventoryItem | null;
-}
-
-/**
- * Deterministic per-material colour. Falls back to amber when the
- * material is null or not in the known list so unclassified piles
- * still render (just uncoloured by type).
- */
-function materialColor(material: string | null | undefined): Color {
-  switch ((material ?? "").toLowerCase()) {
-    case "iron_ore":
-    case "iron ore":
-      return Color.fromCssColorString("#c2410c");
-    case "coal":
-      return Color.fromCssColorString("#1f2937");
-    case "limestone":
-      return Color.fromCssColorString("#e7e5e4");
-    case "copper":
-    case "copper_ore":
-      return Color.fromCssColorString("#b45309");
-    case "gold":
-    case "gold_ore":
-      return Color.fromCssColorString("#ca8a04");
-    case "bauxite":
-      return Color.fromCssColorString("#9a3412");
-    case "sand":
-      return Color.fromCssColorString("#d4a574");
-    case "gravel":
-      return Color.fromCssColorString("#78716c");
-    default:
-      return Color.fromCssColorString("#eab308");
-  }
 }
 
 /**
@@ -194,18 +163,15 @@ export default function StockpileMeshPreview({ item }: Props) {
           : 0;
 
       const positions = Cartesian3.fromDegreesArray(parsed.flat);
-      const fill = materialColor(item.material_type);
 
-      const entity = viewer.entities.add({
+      const entity = buildExtrudedStockpileEntity({
         id: `stockpile-${item.id}`,
-        polygon: {
-          hierarchy: new PolygonHierarchy(positions),
-          extrudedHeight: height,
-          material: new ColorMaterialProperty(fill.withAlpha(0.9)),
-          outline: true,
-          outlineColor: Color.WHITE.withAlpha(0.8),
-        },
+        vertices: positions,
+        baseHeight: 0,
+        topHeight: height,
+        color: materialColor(item.material_type),
       });
+      viewer.entities.add(entity);
       entityIdRef.current = entity.id;
 
       const [w, s, e, n] = parsed.bbox;

@@ -48,9 +48,10 @@ export function toCSV(rows: MeasurementRow[]): string {
   return lines.join('\n');
 }
 
-/** Trigger a browser file download from a string. */
-export function downloadCSV(filename: string, csvContent: string): void {
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+/** Trigger a browser file download from a Blob. Reused by every viewer
+ *  export path (CSV, GeoJSON, PNG, future PDF). Keeps a single place for
+ *  the Object-URL revoke so we don't leak blobs across exports. */
+export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -60,6 +61,11 @@ export function downloadCSV(filename: string, csvContent: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/** Trigger a browser file download from a string. */
+export function downloadCSV(filename: string, csvContent: string): void {
+  downloadBlob(new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }), filename);
 }
 
 /**
@@ -73,4 +79,13 @@ export async function exportMeasurementsCSV(
   const csv = toCSV(measurements);
   const date = new Date().toISOString().split('T')[0];
   downloadCSV(`${projectName}_measurements_${date}.csv`, csv);
+}
+
+/**
+ * V-OUTPUT-02 — single-measurement CSV row. Shares the `MeasurementRow`
+ * shape with the bulk exporter so downstream consumers get a consistent
+ * schema.
+ */
+export function exportMeasurementAsCsv(row: MeasurementRow, filename: string): void {
+  downloadCSV(filename, toCSV([row]));
 }

@@ -38,7 +38,7 @@
  *      Addendum" for the per-tool field tables and PRD stage mapping.
  */
 
-import React, { useMemo } from 'react';
+import React, { useId, useMemo } from 'react';
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -93,6 +93,13 @@ import {
   useCutFillComputeStatus,
   useCutFillComputeSubmit,
 } from '@/hooks/useCutFillCompute';
+import {
+  estimateVolumeError,
+  rmseForTerrain,
+  toneForErrorPct,
+  type VolumeErrorEstimate,
+} from '@/lib/viewer/terrainRmse';
+import { ProvenanceFooter } from './ProvenanceFooter';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -447,6 +454,75 @@ function confidenceFor(sampleCount: number): {
   return { tone: 'low', label: 'Low' };
 }
 
+const StockpileFootprintSVG: React.FC<{
+  points: MeasurementPoint[];
+  meanHeight: number;
+}> = ({ points, meanHeight }) => {
+  const reactId = useId();
+  const patternId = `fp-grid-${reactId.replace(/:/g, '')}`;
+  const W = 200, H = 110;
+  const PAD = 16;
+
+  if (points.length < 3) return null;
+
+  const lngs = points.map((p) => p.longitude);
+  const lats = points.map((p) => p.latitude);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const lngSpan = maxLng - minLng || 0.0001;
+  const latSpan = maxLat - minLat || 0.0001;
+
+  const usableW = W - PAD * 2;
+  const usableH = H - PAD * 2 - 10;
+  const scale = Math.min(usableW / lngSpan, usableH / latSpan) * 0.85;
+  const projW = lngSpan * scale;
+  const projH = latSpan * scale;
+  const offX = (W - projW) / 2;
+  const offY = (H - 10 - projH) / 2;
+
+  const toSVG = (lng: number, lat: number): [number, number] => [
+    offX + (lng - minLng) * scale,
+    offY + projH - (lat - minLat) * scale,
+  ];
+
+  const polyPts = points.map((p) => toSVG(p.longitude, p.latitude).join(',')).join(' ');
+  const cx = offX + projW / 2;
+  const cy = offY + projH / 2;
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full block"
+      style={{ display: 'block', background: 'rgba(8,8,10,0.7)' }}
+      aria-label="Stockpile footprint — top-down plan view"
+    >
+      <defs>
+        <pattern id={patternId} x="0" y="0" width="12" height="12" patternUnits="userSpaceOnUse">
+          <circle cx="0" cy="0" r="0.6" fill="rgba(255,255,255,0.05)" />
+        </pattern>
+      </defs>
+      <rect width={W} height={H} fill={`url(#${patternId})`} />
+      <polygon
+        points={polyPts}
+        fill="rgba(234,179,8,0.18)"
+        stroke="rgba(234,179,8,0.9)"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+      <text x={cx} y={cy + 2.5} textAnchor="middle" fontSize="7.5"
+        fill="rgba(234,179,8,0.9)" fontFamily="monospace" fontWeight="600">
+        {`+${meanHeight.toFixed(1)} m`}
+      </text>
+      <text x={W - 5} y={11} textAnchor="end" fontSize="7"
+        fill="rgba(255,255,255,0.22)" fontFamily="monospace">N↑</text>
+      <text x={W / 2} y={H - 3} textAnchor="middle" fontSize="5.5"
+        fill="rgba(255,255,255,0.18)" fontFamily="monospace" letterSpacing="0.5">
+        PLAN VIEW
+      </text>
+    </svg>
+  );
+};
+
 const VolumeSubView: React.FC<{
   measurement: MeasurementState;
   projectId: string | null | undefined;
@@ -457,6 +533,9 @@ const VolumeSubView: React.FC<{
   const basePlane: VolumeBasePlane = measurement.basePlane ?? 'avg';
   const recomputeVolume = useViewerStore((s) => s.recomputeVolume);
   const openSaveModal = useViewerStore((s) => s.openSaveModalForMeasurement);
+  const terrainMode = useViewerStore((s) => s.terrainMode);
+  const showMeshPreview = useViewerStore((s) => s.showMeshPreview);
+  const setShowMeshPreview = useViewerStore((s) => s.setShowMeshPreview);
   const { data: materialRows = [] } = useMaterials(projectId);
   // BE-A: server-side per-tenant density rows. The card prefers these
   // over the offline LUT so the in-card tonnage estimate matches the
@@ -509,6 +588,10 @@ const VolumeSubView: React.FC<{
   // the dock shows. Keep it timeline-driven and explicit.
   const availableSurveys = useViewerStore((s) => s.availableSurveys);
   const activeSurveyId = useViewerStore((s) => s.activeSurveyId);
+  const surveyDate = useMemo(
+    () => availableSurveys.find((s) => s.id === activeSurveyId)?.date ?? null,
+    [availableSurveys, activeSurveyId],
+  );
   const surveyPair = useMemo(() => {
     if (!activeSurveyId) return null;
     const ix = availableSurveys.findIndex((s) => s.id === activeSurveyId);
@@ -582,12 +665,30 @@ const VolumeSubView: React.FC<{
     return measurement.volumeCubicMeters * resolvedDensity.density;
   }, [isComplete, measurement.volumeCubicMeters, resolvedDensity.density]);
 
+  // V-TRUST-01 — propagate terrain RMSE through the sample grid so the
+  // headline shows ± X % (95 % CI) alongside the net number. Recomputes
+  // live on terrainMode change even when the volume sum itself is still
+  // from the prior recompute; operators have asked for an at-a-glance
+  // sense of how much slop is in the value, not just High/Med/Low.
+  const errorEstimate: VolumeErrorEstimate = useMemo(() => {
+    if (!breakdown || !isComplete) return { m3: 0, pct: null };
+    return estimateVolumeError({
+      sampleCount: breakdown.sampleCount,
+      polygonAreaM2: measurement.areaSquareMeters ?? 0,
+      netVolM3: breakdown.netVol,
+      rmseM: rmseForTerrain(terrainMode),
+    });
+  }, [breakdown, isComplete, measurement.areaSquareMeters, terrainMode]);
+
   const provenanceLabel =
     resolvedDensity.source === 'server-client'
       ? 'server (override)'
       : resolvedDensity.source === 'server-default'
       ? 'server (default)'
       : 'LUT';
+
+  const area = measurement.areaSquareMeters ?? 0;
+  const meanH = area > 0 && breakdown ? breakdown.netVol / area : 0;
 
   const handleCompareWithLast = () => {
     if (!projectId) {
@@ -676,11 +777,12 @@ const VolumeSubView: React.FC<{
               {
                 label: 'Net volume',
                 value: (
-                  <strong>
-                    {formatVolume(measurement.volumeCubicMeters ?? 0)}
-                  </strong>
+                  <span className="inline-flex flex-col gap-0.5 min-w-0">
+                    <strong>{formatVolume(measurement.volumeCubicMeters ?? 0)}</strong>
+                    <AccuracyBand error={errorEstimate} terrainMode={terrainMode} />
+                  </span>
                 ),
-                hint: 'fillVol − cutVol — the headline that flowed to the live chip',
+                hint: `fillVol − cutVol, reported with a 95% CI derived from ${terrainMode.toUpperCase()} RMSE · √N · cell area`,
               },
               {
                 label: 'Tonnage (≈ est.)',
@@ -731,6 +833,56 @@ const VolumeSubView: React.FC<{
               },
             ]}
           />
+
+          <SectionLabel icon={<Mountain className="size-3" />} label="Preview" />
+          <div className="rounded-sm border border-border-subtle overflow-hidden">
+            <StockpileFootprintSVG
+              points={points}
+              meanHeight={meanH}
+            />
+            <div className="bg-bg-base/60 px-2 pt-1.5 pb-2 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] text-text-muted">Show on map</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={showMeshPreview}
+                  onClick={() => setShowMeshPreview(!showMeshPreview)}
+                  className={cn(
+                    'relative inline-flex h-4 w-7 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
+                    showMeshPreview ? 'bg-accent' : 'bg-bg-elevated',
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'pointer-events-none inline-block size-3 rounded-full bg-white shadow-sm transition-transform',
+                      showMeshPreview ? 'translate-x-3' : 'translate-x-0',
+                    )}
+                  />
+                  <span className="sr-only">{showMeshPreview ? 'Hide' : 'Show'} on map</span>
+                </button>
+              </div>
+              <KpiGrid
+                items={[
+                  {
+                    label: 'Base elevation',
+                    value: formatElevation(breakdown.baseElevation),
+                    hint: 'Base-plane elevation a.s.l.',
+                  },
+                  {
+                    label: 'Mean height',
+                    value: formatElevation(meanH),
+                    hint: 'Net volume ÷ footprint area',
+                  },
+                  {
+                    label: 'Top elevation',
+                    value: formatElevation(breakdown.baseElevation + meanH),
+                    hint: 'Base + mean height',
+                  },
+                ]}
+              />
+            </div>
+          </div>
 
           {cutFillWarning && (
             <div className="flex items-start gap-1.5 rounded-sm border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200">
@@ -793,11 +945,19 @@ const VolumeSubView: React.FC<{
                 }
                 className="h-7 w-full rounded-sm border border-border-subtle bg-bg-elevated px-2 text-[11px] text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60 disabled:opacity-50"
               >
-                <option value="avg">Average vertex elevation</option>
-                <option value="min">Minimum vertex (conservative fill)</option>
-                <option value="max">Maximum vertex (conservative cut)</option>
-                <option value="fitted">Fitted plane (least-squares)</option>
+                <option value="avg"   title="Use for uniform flat ground (default).">Average vertex elevation</option>
+                <option value="min"   title="Use for containment volume (lowest vertex as reference).">Minimum vertex (conservative fill)</option>
+                <option value="max"   title="Use for deficit / cut-volume below a peak.">Maximum vertex (conservative cut)</option>
+                <option value="fitted" title="Use for tilted pads or sloped stockpiles.">Fitted plane (least-squares)</option>
               </select>
+              {/* V-TRUST-03 — inline hint that changes with selection so
+                  the guidance is always visible, not just on hover. */}
+              <p className="text-[10px] text-text-muted leading-snug">
+                {basePlane === 'avg'    && 'Use for uniform flat ground (default).'}
+                {basePlane === 'min'    && 'Use for containment volume (lowest vertex as reference).'}
+                {basePlane === 'max'    && 'Use for deficit / cut-volume below a peak.'}
+                {basePlane === 'fitted' && 'Use for tilted pads or sloped stockpiles.'}
+              </p>
               {recomputing && (
                 <p className="text-[10px] text-text-muted">Recomputing…</p>
               )}
@@ -853,9 +1013,9 @@ const VolumeSubView: React.FC<{
                   computeStatus.data?.status !== 'failed')
               }
               title={
-                !surveyPair
-                  ? 'Load at least two surveys on the project timeline to compare.'
-                  : `Diff ${surveyPair.baselineLabel} → ${surveyPair.comparisonLabel} inside this polygon.`
+                surveyPair
+                  ? `Diff ${surveyPair.baselineLabel} → ${surveyPair.comparisonLabel} inside this polygon.`
+                  : undefined
               }
               className="inline-flex items-center gap-1.5 rounded-sm border border-accent/40 bg-accent/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-accent hover:bg-accent/20 transition-colors disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-accent/10"
             >
@@ -869,6 +1029,25 @@ const VolumeSubView: React.FC<{
                   : 'Compare with last survey'}
             </button>
           </div>
+
+          {/* V-COMPARE-01 — inline empty-state replaces the hover-only
+              `title` tooltip that operators kept missing. When the
+              project has a single survey the compare button is useless,
+              so we tell the user what to do instead of leaving them
+              guessing. Stays hidden once a second survey lands. */}
+          {!surveyPair && (
+            <div className="rounded-sm border border-border-subtle bg-bg-elevated/40 px-2 py-1.5 text-[11px] text-text-muted">
+              <LayersIcon className="inline size-3 mr-1.5 align-text-bottom" />
+              Upload or switch to a second survey on the timeline to enable comparison.
+            </div>
+          )}
+
+          <ProvenanceFooter
+            terrainMode={terrainMode}
+            basePlane={basePlane}
+            surveyDate={surveyDate}
+            computedAtEpochMs={measurement.computedAt ?? null}
+          />
         </>
       )}
     </div>
@@ -1031,6 +1210,36 @@ const ConfidenceChip: React.FC<{ count: number }> = ({ count }) => {
       )}
     >
       {c.label}
+    </span>
+  );
+};
+
+/** V-TRUST-01 — quantified accuracy band rendered beneath the Net volume
+ *  headline. Falls back to an m³ width when netVol is ~0 (pct would
+ *  blow up). The chip colour comes from the same tier mapping that
+ *  drives the sample-count ConfidenceChip so the two stay coherent. */
+const AccuracyBand: React.FC<{
+  error: VolumeErrorEstimate;
+  terrainMode: 'dtm' | 'dsm';
+}> = ({ error, terrainMode }) => {
+  if (error.m3 <= 0) return null;
+  const tone = toneForErrorPct(error.pct);
+  const cls =
+    tone === 'high'
+      ? 'text-emerald-300'
+      : tone === 'med'
+        ? 'text-amber-300'
+        : 'text-rose-300';
+  const label =
+    error.pct !== null
+      ? `± ${error.pct.toFixed(1)}% (95% CI)`
+      : `± ${formatVolume(error.m3)} (95% CI)`;
+  return (
+    <span
+      className={cn('text-[9px] uppercase tracking-[0.12em] font-mono', cls)}
+      title={`${terrainMode.toUpperCase()} terrain RMSE · propagated through the sample grid`}
+    >
+      {label}
     </span>
   );
 };

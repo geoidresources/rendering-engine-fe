@@ -438,3 +438,44 @@ export interface QAChecklist {
   created_at: string;
   updated_at: string;
 }
+
+// --- Viewer presets (V-TASK-01) ---
+
+/**
+ * Per-user workspace preset served from user-svc
+ * (`/user-svc/api/v1/users/me/viewer-presets`). System presets are
+ * returned with `is_system: true` alongside user-created rows; the
+ * frontend hides edit/delete actions on system presets and the backend
+ * rejects `PUT`/`DELETE` on their fixed UUIDs with 403.
+ *
+ * `config` is opaque JSON — the current v1 shape is declared as
+ * `ViewerPresetConfig`, but the backend stores whatever it receives so
+ * older clients roll forward gracefully when new fields are added.
+ */
+export interface ViewerPreset {
+  id: string;
+  client_id: string;
+  user_id: string;
+  name: string;
+  config: ViewerPresetConfig;
+  is_system: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ViewerPresetLayer {
+  visible: boolean;
+  opacity: number;
+}
+
+export interface ViewerPresetConfig {
+  ver: number;
+  layers?: Partial<Record<'ortho' | 'dsm' | 'laz' | 'contours' | 'heatmap', ViewerPresetLayer>>;
+  terrainMode?: 'dtm' | 'dsm';
+  blendPreset?: 'stacked' | 'embedded' | 'flat';
+  activeTool?: string;
+  compareMode?: 'slider' | 'side-by-side' | 'diff' | null;
+  terrainExaggeration?: number;
+  pointBudget?: number;
+  [key: string]: unknown;
+}

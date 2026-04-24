@@ -5,6 +5,7 @@ import {
   Activity,
   AlertTriangle,
   ArrowDownUp,
+  Bookmark,
   Columns2,
   Eye,
   EyeOff,
@@ -13,6 +14,7 @@ import {
   Loader2,
   MapPinned,
   MoveHorizontal,
+  MoreHorizontal,
   PanelRightClose,
   PanelRightOpen,
   Pencil,
@@ -26,12 +28,25 @@ import type { Viewer as CesiumViewer } from 'cesium';
 
 import { useViewerStore, type LayerId, type RightRailTab } from '@/store/viewerStore';
 import { useCompareStore } from '@/store/compareStore';
+import { useSiteStore } from '@/store/siteStore';
 import { useCutFill } from '@/hooks/useCutFill';
 import { useMaterials } from '@/hooks/useMaterials';
-import { useMeasurementsList, useDeleteMeasurement } from '@/hooks/useMeasurementsCrud';
+import { useMeasurementsList, useDeleteMeasurement, useRecomputeMeasurement, type MeasurementResponse, type QAStatus } from '@/hooks/useMeasurementsCrud';
+import { DesignOverlayUploader } from '@/components/viewer/DesignOverlayUploader';
+import { RegionAlertTooltip } from '@/components/viewer/RegionAlertTooltip';
+import { BookmarksPanel } from '@/components/viewer/BookmarksPanel';
+import { useViewerThresholdAlerts } from '@/hooks/useViewerThresholdAlerts';
+import { exportMeasurementAsGeoJson } from '@/lib/export/geojsonExport';
+import { exportMeasurementAsCsv, type MeasurementRow } from '@/lib/export/csvExport';
 import { apiClient, unwrapList } from '@/lib/http';
 import type { ListEnvelope } from '@/types/api';
 import StatusChip, { type StatusTone } from '@/components/ui/StatusChip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { EmptyStateNudge } from './EmptyStateNudge';
 import { MeasurementResultsCard } from './MeasurementResultsCard';
@@ -69,6 +84,7 @@ const TABS: TabDef[] = [
   // tab still represents geometric features; revisit if it confuses.
   { id: 'measurements', label: 'Saved regions', icon: Ruler, shortcut: '4' },
   { id: 'compare', label: 'Compare', icon: Columns2, shortcut: '5' },
+  { id: 'bookmarks', label: 'Bookmarks', icon: Bookmark, shortcut: '6' },
 ];
 
 /**
@@ -92,16 +108,28 @@ export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId, viewe
       role="complementary"
       aria-label="Site context rail"
       className={cn(
-        'shrink-0 h-full flex border-l border-border-subtle bg-bg-surface/85 backdrop-blur-md',
-        'supports-[backdrop-filter]:bg-bg-surface/65',
-        collapsed ? 'w-9' : 'w-[360px]',
+        // ≥lg: vertical rail on the right side (unchanged behaviour).
+        'lg:shrink-0 lg:h-full lg:flex lg:border-l lg:border-t-0',
+        'lg:border-border-subtle lg:bg-bg-surface/85 lg:backdrop-blur-md',
+        'lg:supports-[backdrop-filter]:bg-bg-surface/65',
+        collapsed ? 'lg:w-9' : 'lg:w-[360px]',
+        // <lg: fixed bottom sheet.
+        'fixed bottom-0 left-0 right-0 flex flex-col rounded-t-xl border-t border-border-subtle',
+        'bg-bg-surface/95 backdrop-blur-md shadow-2xl z-30',
+        'lg:relative lg:rounded-none lg:flex-row',
+        collapsed ? 'max-h-10' : 'max-h-[60dvh]',
       )}
     >
       {/* Vertical tab strip — always visible; doubles as collapse handle */}
       <div
         role="tablist"
         aria-orientation="vertical"
-        className="flex w-9 shrink-0 flex-col items-center gap-1 border-r border-border-subtle bg-bg-base/60 py-2"
+        className={cn(
+          'flex shrink-0 items-center gap-1 bg-bg-base/60',
+          // Horizontal strip on mobile, vertical strip on lg+.
+          'flex-row w-full border-b border-border-subtle px-2 py-1.5',
+          'lg:flex-col lg:w-9 lg:h-full lg:border-r lg:border-b-0 lg:py-2 lg:px-0',
+        )}
       >
         {TABS.map(({ id, label, icon: Icon, shortcut }) => {
           const active = !collapsed && tab === id;
@@ -123,7 +151,7 @@ export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId, viewe
                 }
               }}
               className={cn(
-                'h-9 w-7 grid place-items-center rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
+                'h-10 w-10 lg:h-9 lg:w-7 grid place-items-center rounded-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
                 active
                   ? 'bg-accent/15 text-accent'
                   : 'text-text-muted hover:text-text-primary hover:bg-bg-elevated',
@@ -139,7 +167,7 @@ export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId, viewe
           aria-label={collapsed ? 'Expand rail' : 'Collapse rail'}
           title={collapsed ? 'Expand rail' : 'Collapse rail'}
           onClick={() => setCollapsed(!collapsed)}
-          className="h-9 w-7 grid place-items-center rounded-sm text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
+          className="h-10 w-10 lg:h-9 lg:w-7 grid place-items-center rounded-sm text-text-muted hover:text-text-primary hover:bg-bg-elevated transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
         >
           {collapsed ? <PanelRightOpen className="size-4" /> : <PanelRightClose className="size-4" />}
         </button>
@@ -168,6 +196,7 @@ export const RightRail: React.FC<RightRailProps> = ({ surveyId, projectId, viewe
             )}
             {tab === 'measurements' && <SavedRegionsTab projectId={projectId} />}
             {tab === 'compare' && <CompareTab />}
+            {tab === 'bookmarks' && <BookmarksPanel surveyId={surveyId} />}
           </div>
         </div>
       )}
@@ -440,6 +469,7 @@ const LayersTab: React.FC = () => {
   const setLayerOpacity = useViewerStore((s) => s.setLayerOpacity);
   const blendPreset = useViewerStore((s) => s.blendPreset);
   const setBlendPreset = useViewerStore((s) => s.setBlendPreset);
+  const activePresetId = useViewerStore((s) => s.activePresetId);
   // Terrain mode is a sub-setting of the Terrain layer — Cesium can only
   // attach one terrain provider at a time, so DTM and DSM are mutually
   // exclusive flavours of the same surface. Lives here (not on the
@@ -447,13 +477,12 @@ const LayersTab: React.FC = () => {
   const terrainMode = useViewerStore((s) => s.terrainMode);
   const setTerrainMode = useViewerStore((s) => s.setTerrainMode);
 
-  return (
-    <div className="px-3 py-3 space-y-3">
-      <p className="text-[10px] uppercase tracking-[0.15em] text-text-muted leading-snug">
-        Toggle visibility and opacity per layer. Choose bare-earth (DTM) or
-        surface (DSM) for terrain.
-      </p>
+  const presetActive = activePresetId !== null;
 
+  // Raw primitives (blend + per-layer opacity) wrapped in an Advanced accordion
+  // when a workspace preset is active. Visibility toggles always stay visible.
+  const rawControls = (
+    <>
       <div className="rounded-sm border border-border-subtle bg-bg-base/60 p-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -608,6 +637,44 @@ const LayersTab: React.FC = () => {
           </div>
         );
       })}
+    </>
+  );
+
+  return (
+    <div className="px-3 py-3 space-y-3">
+      <p className="text-[10px] uppercase tracking-[0.15em] text-text-muted leading-snug">
+        Toggle visibility and opacity per layer. Choose bare-earth (DTM) or
+        surface (DSM) for terrain.
+      </p>
+
+      {presetActive ? (
+        <details className="group rounded-sm border border-border-subtle bg-bg-base/60">
+          <summary className="flex cursor-pointer select-none items-center justify-between px-3 py-2 text-[10px] uppercase tracking-[0.15em] text-text-muted hover:text-text-primary list-none">
+            <span className="font-semibold">Advanced</span>
+            <svg
+              className="size-3 rotate-0 transition-transform group-open:rotate-90"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden="true"
+            >
+              <path d="M4 2l4 4-4 4" />
+            </svg>
+          </summary>
+          <div className="px-3 pb-3 space-y-3 opacity-80">
+            {rawControls}
+          </div>
+        </details>
+      ) : (
+        rawControls
+      )}
+
+      {/* V-TASK-03: design overlay upload */}
+      <div className="pt-1">
+        <p className="text-[9px] uppercase tracking-[0.15em] text-text-muted mb-1.5">Design overlay</p>
+        <DesignOverlayUploader />
+      </div>
     </div>
   );
 };
@@ -819,6 +886,25 @@ function formatPropertyValue(val: unknown): string {
 
 /* ───────────────────────── Saved regions ───────────────────────── */
 
+const QA_PILL_STYLES: Record<QAStatus, string> = {
+  approved: 'bg-green-500/15 text-green-400 border-green-500/30',
+  pending: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
+  rejected: 'bg-red-500/15 text-red-400 border-red-500/30',
+};
+
+function QAStatusPill({ status }: { status: QAStatus }) {
+  return (
+    <span
+      className={cn(
+        'shrink-0 inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] leading-none',
+        QA_PILL_STYLES[status],
+      )}
+    >
+      {status}
+    </span>
+  );
+}
+
 // Tab content for the right rail's "Saved regions" tab. Reads the
 // backend-persisted measurement / drawn-region catalogue via
 // `useMeasurementsList` — these are durable, server-side features, not
@@ -826,10 +912,49 @@ function formatPropertyValue(val: unknown): string {
 // and is rendered by InspectorTab + MeasurementLiveReadout.
 type SavedRegionsSortKey = 'recent' | 'name' | 'material';
 
+/** Filesystem-safe slug for filename fragments: lowercase, non-alphanumerics
+ *  collapsed to `-`, trimmed, capped so a long region name doesn't blow out
+ *  the OS name limit. Shared by the V-OUTPUT-02 export menu. */
+function slugifyForFilename(input: string): string {
+  const cleaned = input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
+  return cleaned.length ? cleaned.slice(0, 64) : 'untitled';
+}
+
+/** Map an asset-svc `MeasurementResponse` onto the shared `MeasurementRow`
+ *  CSV schema. Volume / area / tonnage live under `properties` on the
+ *  server record; we surface what's there and leave the rest null so the
+ *  columns stay stable. */
+function measurementToCsvRow(row: MeasurementResponse): MeasurementRow {
+  const props = row.properties ?? {};
+  const asNumber = (v: unknown): number | null =>
+    typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const geom = row.geojson as { coordinates?: unknown } | undefined;
+  return {
+    id: row.id,
+    type: row.feature_type,
+    name: row.name,
+    project_id: row.project_id,
+    survey_id: row.latest_survey_id ?? '',
+    coordinates: geom?.coordinates ? JSON.stringify(geom.coordinates) : '',
+    distance_m: asNumber(props.distance_m),
+    area_m2: asNumber(props.area_m2),
+    volume_m3: asNumber(props.volume_m3),
+    created_at: row.created_at,
+  };
+}
+
 const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
   const { data: rows = [], isLoading, error } = useMeasurementsList(projectId);
   const flyTo = useViewerStore((s) => s.flyTo);
   const deleteMutation = useDeleteMeasurement(projectId);
+  const recomputeMutation = useRecomputeMeasurement(projectId);
+  const breaches = useViewerThresholdAlerts(projectId);
+  const recentSites = useSiteStore((s) => s.recentSites);
+  const projectName = recentSites.find((s) => s.projectId === projectId)?.name;
+  const projectSlug = slugifyForFilename(projectName ?? 'geoid');
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState<SavedRegionsSortKey>('recent');
 
@@ -953,6 +1078,27 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
       {sorted.map((row) => {
         const c = centroid(row);
         const material = (row.properties?.material as string | undefined) ?? row.feature_type;
+        const dateStamp = (row.updated_at ?? row.created_at ?? new Date().toISOString()).slice(0, 10);
+        const baseName = `${projectSlug}_${slugifyForFilename(row.name)}_${dateStamp}`;
+        const onExportGeoJson = () => {
+          exportMeasurementAsGeoJson(
+            {
+              id: row.id,
+              name: row.name,
+              feature_type: row.feature_type,
+              geojson: row.geojson,
+              properties: row.properties ?? null,
+              is_locked: row.is_locked,
+              created_at: row.created_at,
+              updated_at: row.updated_at,
+              material_type: (row.properties?.material as string | undefined) ?? null,
+            },
+            `${baseName}.geojson`,
+          );
+        };
+        const onExportCsv = () => {
+          exportMeasurementAsCsv(measurementToCsvRow(row), `${baseName}.csv`);
+        };
         return (
           <div
             key={row.id}
@@ -969,6 +1115,46 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
               <p className="text-[9px] uppercase tracking-[0.12em] text-text-muted">
                 {material}
               </p>
+            </button>
+            {row.qa_status && <QAStatusPill status={row.qa_status} />}
+            {breaches[row.id] && <RegionAlertTooltip breach={breaches[row.id]} />}
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label={`Export ${row.name}`}
+                    title="Export"
+                    className="opacity-0 group-hover:opacity-100 data-[popup-open]:opacity-100 size-5 grid place-items-center rounded-sm text-text-muted hover:text-text-primary hover:bg-bg-surface"
+                  >
+                    <MoreHorizontal className="size-3.5" />
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="end" className="bg-card border-border-subtle w-44">
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={onExportGeoJson}
+                >
+                  Export GeoJSON
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={onExportCsv}
+                >
+                  Export CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <button
+              type="button"
+              aria-label={`Recompute volume for ${row.name}`}
+              title={row.computed_at ? `Last computed ${row.computed_at.slice(0, 10)}` : 'Recompute volume'}
+              onClick={() => recomputeMutation.mutate(row.id)}
+              disabled={recomputeMutation.isPending}
+              className="opacity-0 group-hover:opacity-100 text-[9px] uppercase tracking-[0.12em] text-accent hover:text-accent/70 disabled:opacity-30"
+            >
+              {recomputeMutation.isPending ? <Loader2 className="size-3 animate-spin" /> : 'Recompute'}
             </button>
             <button
               type="button"

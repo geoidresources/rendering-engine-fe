@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { Loader2, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { useViewerStore } from '@/store/viewerStore';
@@ -18,16 +18,19 @@ import { Input } from '@/components/ui/input';
 
 /**
  * Single-field modal that turns the click captured in
- * `viewerStore.annotationDraft.point` into a persisted pin via
- * `addAnnotation`. Auto-mounts whenever a draft is open; closing without
- * saving cancels the draft and stays in Annotate mode so the user can
- * try again.
+ * `viewerStore.annotationDraft.point` into a persisted backend annotation.
+ * `onSave` is provided by the parent (Viewer.tsx) which owns the
+ * `useAnnotations` hook — this keeps the modal unaware of the mutation
+ * implementation and lets Viewer handle loading/error state at the right level.
  *
- * Like SaveRegionModal we wrap the form in a thin shell so the inner
- * `useState` initialiser fires once per open — no stale value carrying
- * over between pins, no setState-in-effect.
+ * Auto-mounts whenever a draft is open; closing without saving cancels the
+ * draft and stays in Annotate mode so the user can try again.
  */
-export const AnnotationModal: React.FC = () => {
+interface AnnotationModalProps {
+  onSave: (text: string) => Promise<void>;
+}
+
+export const AnnotationModal: React.FC<AnnotationModalProps> = ({ onSave }) => {
   const draftPoint = useViewerStore((s) => s.annotationDraft.point);
   const cancelDraft = useViewerStore((s) => s.cancelAnnotationDraft);
   const open = draftPoint != null;
@@ -40,27 +43,25 @@ export const AnnotationModal: React.FC = () => {
       }}
     >
       <DialogContent className="sm:max-w-md">
-        {open && <AnnotationForm />}
+        {open && <AnnotationForm onSave={onSave} />}
       </DialogContent>
     </Dialog>
   );
 };
 
-const AnnotationForm: React.FC = () => {
+const AnnotationForm: React.FC<{ onSave: (text: string) => Promise<void> }> = ({ onSave }) => {
   const draftPoint = useViewerStore((s) => s.annotationDraft.point);
   const cancelDraft = useViewerStore((s) => s.cancelAnnotationDraft);
-  const addAnnotation = useViewerStore((s) => s.addAnnotation);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
 
   const [text, setText] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const handleCancel = () => {
     cancelDraft();
-    // Stay in annotate mode — the user opened the modal by entering it,
-    // so leaving them in 'select' would feel like a tool lockout.
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmed = text.trim();
     if (!trimmed) {
       toast.error('Annotation needs a label.');
@@ -71,15 +72,18 @@ const AnnotationForm: React.FC = () => {
       cancelDraft();
       return;
     }
-    addAnnotation(trimmed);
-    toast.success('Pin dropped.');
-    // After saving, drop back into Select so the canvas is interactive
-    // (pan/zoom) again. Power users who want to drop several pins in a
-    // row can press A then click again.
-    setActiveTool('select');
+    setSaving(true);
+    try {
+      await onSave(trimmed);
+      toast.success('Pin dropped.');
+      setActiveTool('select');
+    } catch {
+      toast.error('Failed to save annotation — check your connection.');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  // Cmd/Ctrl+Enter saves; Esc handled by the Dialog's onOpenChange.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -95,8 +99,8 @@ const AnnotationForm: React.FC = () => {
           New annotation
         </DialogTitle>
         <DialogDescription>
-          Add a short label for this point. Pins persist for the session
-          and can be hidden from the Layers tab.
+          Add a short label for this point. Pins persist across sessions and
+          are shared with all users of this survey.
         </DialogDescription>
       </DialogHeader>
 
@@ -115,6 +119,7 @@ const AnnotationForm: React.FC = () => {
             placeholder="e.g. Equipment park"
             autoFocus
             maxLength={80}
+            disabled={saving}
           />
         </div>
 
@@ -137,10 +142,11 @@ const AnnotationForm: React.FC = () => {
       </div>
 
       <DialogFooter>
-        <Button type="button" variant="ghost" onClick={handleCancel}>
+        <Button type="button" variant="ghost" onClick={handleCancel} disabled={saving}>
           Cancel
         </Button>
-        <Button type="button" onClick={handleSave} disabled={!text.trim()}>
+        <Button type="button" onClick={handleSave} disabled={!text.trim() || saving}>
+          {saving ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : null}
           Save pin
         </Button>
       </DialogFooter>

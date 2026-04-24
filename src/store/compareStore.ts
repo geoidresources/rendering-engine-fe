@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type CompareMode = "slider" | "side-by-side" | "diff";
+export type CompareMode = "slider" | "diff";
 
 interface CompareState {
   enabled: boolean;
