@@ -662,10 +662,10 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     // post-completion event that *does* belong in Saved regions.
     const tab: RightRailTab =
       reason === 'selection' ? 'inspector' :
-      reason === 'compare-on' ? 'compare' :
-      reason === 'measurement-active' ? 'inspector' :
-      reason === 'measurement-saved' ? 'measurements' :
-      'layers';
+        reason === 'compare-on' ? 'compare' :
+          reason === 'measurement-active' ? 'inspector' :
+            reason === 'measurement-saved' ? 'measurements' :
+              'layers';
     set({ rightRailTab: tab, rightRailCollapsed: false });
   },
 

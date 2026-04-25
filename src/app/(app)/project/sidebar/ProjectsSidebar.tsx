@@ -105,7 +105,7 @@ export function ProjectsSidebar() {
         <div className="flex flex-col items-center gap-1 py-2">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/home")}
             className={cn(
               "grid h-8 w-8 shrink-0 place-items-center rounded-sm",
               "text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors",
@@ -136,7 +136,7 @@ export function ProjectsSidebar() {
         <div className="flex items-center gap-2 border-b border-border/60 px-3 py-3">
           <button
             type="button"
-            onClick={() => router.push("/")}
+            onClick={() => router.push("/home")}
             className={cn(
               "grid h-7 w-7 shrink-0 place-items-center rounded-sm",
               "text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors",

@@ -499,10 +499,10 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     const centerLat = boundsCenterLat ?? DEFAULT_SITE_CENTER_LAT;
     const spanDeg = manifest?.bounds
       ? Math.max(
-          Math.abs(manifest.bounds.east - manifest.bounds.west),
-          Math.abs(manifest.bounds.north - manifest.bounds.south),
-          0.002,
-        )
+        Math.abs(manifest.bounds.east - manifest.bounds.west),
+        Math.abs(manifest.bounds.north - manifest.bounds.south),
+        0.002,
+      )
       : 0.02;
     const baseHeight = Math.max(1200, spanDeg * 160000);
     const scale = manifest?.rendering?.suggestedViewHeightScale ?? 1;
@@ -545,30 +545,45 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
+
+    // V-STATE-06: Capture camera and moveEnd early. If we access `viewer.camera`
+    // inside the cleanup after the viewer is destroyed, Cesium's getter throws
+    // "Cannot read properties of undefined (reading 'scene')".
+    const { camera } = viewer;
+    const { moveEnd } = camera;
+
     const handler = () => {
-      const pos = viewer.camera.positionCartographic;
+      if (viewer.isDestroyed()) return;
+      const pos = camera.positionCartographic;
       setCameraState({
         longitude: CesiumMath.toDegrees(pos.longitude),
         latitude: CesiumMath.toDegrees(pos.latitude),
         height: pos.height,
-        heading: viewer.camera.heading,
-        pitch: viewer.camera.pitch,
-        roll: viewer.camera.roll,
+        heading: camera.heading,
+        pitch: camera.pitch,
+        roll: camera.roll,
       });
     };
-    viewer.camera.moveEnd.addEventListener(handler);
-    return () => { viewer.camera.moveEnd.removeEventListener(handler); };
+
+    moveEnd.addEventListener(handler);
+    return () => {
+      moveEnd.removeEventListener(handler);
+    };
   }, [setCameraState]);
 
   // ---- Cursor Position Tracking (for CoordinatesBar) ----
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer) return;
-    const cursorHandler = new ScreenSpaceEventHandler(viewer.scene.canvas);
+    if (!viewer || !viewer.scene) return;
+    const { camera, scene } = viewer;
+    const { globe, canvas } = scene;
+
+    const cursorHandler = new ScreenSpaceEventHandler(canvas);
     cursorHandler.setInputAction((move: { endPosition: Cartesian2 }) => {
-      const ray = viewer.camera.getPickRay(move.endPosition);
+      if (viewer.isDestroyed()) return;
+      const ray = camera.getPickRay(move.endPosition);
       if (!ray) { setCursorPosition(null); return; }
-      const pos = viewer.scene.globe.pick(ray, viewer.scene);
+      const pos = globe.pick(ray, scene);
       if (!pos || !defined(pos)) { setCursorPosition(null); return; }
       const carto = Cartographic.fromCartesian(pos);
       setCursorPosition({
@@ -676,14 +691,14 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     const manifestStatus: AssetStatusRow['status'] = manifestErrorForThisSurvey
       ? 'error'
       : !manifest || (surveyIdProp != null && manifest.surveyId !== surveyIdProp)
-      ? 'loading'
-      : 'done';
+        ? 'loading'
+        : 'done';
     const manifestErrMsg = manifestErrorForThisSurvey
       ? manifestErrorForThisSurvey.status === 401
         ? 'Session expired — sign in again'
         : manifestErrorForThisSurvey.status === 404
-        ? 'Survey manifest not found'
-        : `Manifest unavailable (${manifestErrorForThisSurvey.status || 'network'})`
+          ? 'Survey manifest not found'
+          : `Manifest unavailable (${manifestErrorForThisSurvey.status || 'network'})`
       : undefined;
     rows.push({
       id: 'manifest',
@@ -698,8 +713,8 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
         const status: AssetStatusRow['status'] = state.loading
           ? 'loading'
           : state.error
-          ? 'error'
-          : 'done';
+            ? 'error'
+            : 'done';
         rows.push({
           id,
           label,
@@ -976,22 +991,25 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     return () => { isSubscribed = false; };
   }, [pointCloudTilesetUrl, layers.laz.visible, layers.laz.opacity, pointBudget, setLayerError, setLayerLoading]);
 
-  // Add Dynamic EDL updates based on camera
+  // ---- Dynamic Eye-Dome Lighting (lerp based on camera altitude) ---
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer) return;
+    if (!viewer || !viewer.scene) return;
+    const { scene, camera } = viewer;
+    const { preRender } = scene;
+
     const updateEDL = () => {
       const ts = tilesetRef.current;
-      if (!ts || !ts.show) return;
-      const camDist = viewer.camera.positionCartographic.height;
+      if (!ts || !ts.show || viewer.isDestroyed()) return;
+      const camDist = camera.positionCartographic.height;
       if (ts.pointCloudShading) {
         const { strength, radius } = lerpEDL(camDist);
         ts.pointCloudShading.eyeDomeLightingStrength = strength;
         ts.pointCloudShading.eyeDomeLightingRadius = radius;
       }
     };
-    viewer.scene.preRender.addEventListener(updateEDL);
-    return () => { viewer.scene.preRender.removeEventListener(updateEDL); };
+    preRender.addEventListener(updateEDL);
+    return () => { preRender.removeEventListener(updateEDL); };
   }, []);
 
   // ---- Vector (GeoJSON) Layer ---

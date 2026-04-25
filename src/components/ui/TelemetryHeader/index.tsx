@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Search, Bell, Settings } from "lucide-react";
 import {
   Breadcrumb,
@@ -12,6 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AUTH_TOKEN_KEY, AUTH_SESSION_KEY } from "@/lib/constants";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -23,6 +24,17 @@ import {
 
 export default function TelemetryHeader() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const handleSignOut = () => {
+    try {
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(AUTH_SESSION_KEY);
+    } catch {
+      /* storage disabled */
+    }
+    router.push("/login");
+  };
 
   const segments = pathname
     .split("/")
@@ -92,14 +104,23 @@ export default function TelemetryHeader() {
               Account
             </DropdownMenuLabel>
             <DropdownMenuSeparator className="bg-border-subtle" />
-            <DropdownMenuItem className="text-xs uppercase tracking-wider">
-              Profile
+            <DropdownMenuItem 
+              className="text-xs uppercase tracking-wider"
+              onClick={() => router.push("/client-portal")}
+            >
+              Team & Access
             </DropdownMenuItem>
-            <DropdownMenuItem className="text-xs uppercase tracking-wider">
+            <DropdownMenuItem 
+              className="text-xs uppercase tracking-wider"
+              onClick={() => router.push("/admin")}
+            >
               Settings
             </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-border-subtle" />
-            <DropdownMenuItem className="text-xs uppercase tracking-wider text-destructive">
+            <DropdownMenuItem 
+              className="text-xs uppercase tracking-wider text-destructive"
+              onClick={handleSignOut}
+            >
               Sign Out
             </DropdownMenuItem>
           </DropdownMenuContent>

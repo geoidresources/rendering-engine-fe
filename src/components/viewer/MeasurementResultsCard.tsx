@@ -684,8 +684,8 @@ const VolumeSubView: React.FC<{
     resolvedDensity.source === 'server-client'
       ? 'server (override)'
       : resolvedDensity.source === 'server-default'
-      ? 'server (default)'
-      : 'LUT';
+        ? 'server (default)'
+        : 'LUT';
 
   const area = measurement.areaSquareMeters ?? 0;
   const meanH = area > 0 && breakdown ? breakdown.netVol / area : 0;
@@ -945,17 +945,17 @@ const VolumeSubView: React.FC<{
                 }
                 className="h-7 w-full rounded-sm border border-border-subtle bg-bg-elevated px-2 text-[11px] text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60 disabled:opacity-50"
               >
-                <option value="avg"   title="Use for uniform flat ground (default).">Average vertex elevation</option>
-                <option value="min"   title="Use for containment volume (lowest vertex as reference).">Minimum vertex (conservative fill)</option>
-                <option value="max"   title="Use for deficit / cut-volume below a peak.">Maximum vertex (conservative cut)</option>
+                <option value="avg" title="Use for uniform flat ground (default).">Average vertex elevation</option>
+                <option value="min" title="Use for containment volume (lowest vertex as reference).">Minimum vertex (conservative fill)</option>
+                <option value="max" title="Use for deficit / cut-volume below a peak.">Maximum vertex (conservative cut)</option>
                 <option value="fitted" title="Use for tilted pads or sloped stockpiles.">Fitted plane (least-squares)</option>
               </select>
               {/* V-TRUST-03 — inline hint that changes with selection so
                   the guidance is always visible, not just on hover. */}
               <p className="text-[10px] text-text-muted leading-snug">
-                {basePlane === 'avg'    && 'Use for uniform flat ground (default).'}
-                {basePlane === 'min'    && 'Use for containment volume (lowest vertex as reference).'}
-                {basePlane === 'max'    && 'Use for deficit / cut-volume below a peak.'}
+                {basePlane === 'avg' && 'Use for uniform flat ground (default).'}
+                {basePlane === 'min' && 'Use for containment volume (lowest vertex as reference).'}
+                {basePlane === 'max' && 'Use for deficit / cut-volume below a peak.'}
                 {basePlane === 'fitted' && 'Use for tilted pads or sloped stockpiles.'}
               </p>
               {recomputing && (
@@ -1023,8 +1023,8 @@ const VolumeSubView: React.FC<{
               {submitCompute.isPending
                 ? 'Submitting…'
                 : adhocWorkflowId &&
-                    computeStatus.data?.status !== 'complete' &&
-                    computeStatus.data?.status !== 'failed'
+                  computeStatus.data?.status !== 'complete' &&
+                  computeStatus.data?.status !== 'failed'
                   ? 'Computing…'
                   : 'Compare with last survey'}
             </button>
@@ -1374,8 +1374,8 @@ export const MeasurementResultsCard: React.FC<Props> = ({
         return measurement.status === 'drawing' && pts >= 3
           ? 'Sampling terrain…'
           : measurement.status === 'complete'
-          ? `${pts} vertices · ${measurement.volumeBreakdown?.sampleCount ?? 0} samples`
-          : 'Draw a polygon and right-click to compute';
+            ? `${pts} vertices · ${measurement.volumeBreakdown?.sampleCount ?? 0} samples`
+            : 'Draw a polygon and right-click to compute';
       }
     }
     if (hasProfile) return `${profile.samples!.length} samples`;
