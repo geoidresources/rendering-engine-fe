@@ -45,7 +45,7 @@ import { useViewerStore } from '@/store/viewerStore';
 import { useSiteStore } from '@/store/siteStore';
 import { useMeasurementHandler } from '@/hooks/useMeasurementHandler';
 import { useDrawingHandler } from '@/hooks/useDrawingHandler';
-import { useProfileHandler } from '@/hooks/useProfileHandler';
+
 import { useAnnotationHandler } from '@/hooks/useAnnotationHandler';
 import { useAnnotationLayer } from '@/hooks/useAnnotationLayer';
 import { useDesignOverlayLayer } from '@/hooks/useDesignOverlayLayer';
@@ -190,10 +190,6 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   useMeasurementHandler(viewerRef);
   // Wire the polygon-region draw tool. Activates when activeTool === 'draw-polygon'.
   useDrawingHandler(viewerRef);
-  // Wire the elevation-profile / cross-section sampler. Activates when
-  // activeTool === 'profile' || 'cross-section'; finishes by writing
-  // sampled terrain into viewerStore.profile and flipping back to Select.
-  useProfileHandler(viewerRef);
   // Wire the Annotate tool. The handler captures a single canvas click
   // into `annotationDraft` (which mounts AnnotationModal); the layer
   // hook syncs the saved `annotations` array into a dedicated Cesium

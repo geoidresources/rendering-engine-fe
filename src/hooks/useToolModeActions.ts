@@ -62,10 +62,13 @@ export function useToolModeActions(): ToolModeActions {
       return;
     }
     if (id === 'measure') {
-      // Default to Distance when nothing in the measure family is active.
-      // The submode bar inside ToolPalette will pick up `measureActive`
-      // and render alongside the parent pill.
-      if (!measureActive) setActiveTool('distance');
+      // Default to Area when nothing in the measure family is active,
+      // matching the inspector's default data view ('area').
+      if (!measureActive) {
+        setActiveTool('area');
+        // Also ensure the shape store defaults to polygon.
+        useViewerStore.getState().setMeasureShape('polygon');
+      }
       // Always reveal the rail to Inspector — that's where the live
       // readout lives. (`measurement-active` is a Phase-2 reason that
       // routes to 'inspector' in `viewerStore.revealRailFor`.)

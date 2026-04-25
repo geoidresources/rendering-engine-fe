@@ -71,7 +71,7 @@ export default function ContextBar({ onCommand }: ContextBarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const isViewerRoute = pathname?.startsWith("/project") ?? false;
-  const isOverview = pathname === "/home";
+  const isOverview = pathname === "/home" || pathname?.startsWith("/project");
   const { data: projects = [] } = useProjects();
 
   const activeProjectId = useSiteStore((s) => s.activeProjectId);

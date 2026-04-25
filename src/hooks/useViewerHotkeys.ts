@@ -43,7 +43,7 @@ import { toast } from 'sonner';
 
 import { useViewerStore } from '@/store/viewerStore';
 import { useToolModeActions } from '@/hooks/useToolModeActions';
-import type { ToolMode, RightRailTab } from '@/store/viewerStore';
+import type { ToolMode, RightRailTab, MeasureShape } from '@/store/viewerStore';
 
 const MODE_KEY_MAP: Record<string, 'select' | 'measure' | 'draw' | 'compare' | 'annotate'> = {
   KeyV: 'select',
@@ -53,15 +53,12 @@ const MODE_KEY_MAP: Record<string, 'select' | 'measure' | 'draw' | 'compare' | '
   KeyA: 'annotate',
 };
 
-// Order mirrors `MEASURE_SUBMODES` in ToolPalette and `TABS` in
-// RightRail. Keep the two arrays index-aligned with the toolbar UI —
-// drift here will desync the keyboard hints from the click targets.
-const MEASURE_SUBMODE_ORDER: ToolMode[] = [
-  'distance',
-  'area',
-  'volume',
-  'profile',
-  'cross-section',
+// Shape-based submodes — matches the 3 shape buttons in ToolPalette.
+// Each shape maps to a drawing ToolMode.
+const MEASURE_SHAPE_ORDER: { shape: MeasureShape; toolMode: ToolMode }[] = [
+  { shape: 'line', toolMode: 'distance' },
+  { shape: 'square', toolMode: 'area' },
+  { shape: 'polygon', toolMode: 'area' },
 ];
 const TAB_ORDER: RightRailTab[] = [
   'overview',
@@ -140,7 +137,11 @@ export function useViewerHotkeys(): void {
           return;
         }
         e.preventDefault();
-        setMeasureSubmode(MEASURE_SUBMODE_ORDER[idx]);
+        const entry = MEASURE_SHAPE_ORDER[idx];
+        if (entry) {
+          useViewerStore.getState().setMeasureShape(entry.shape);
+          setMeasureSubmode(entry.toolMode);
+        }
         return;
       }
 

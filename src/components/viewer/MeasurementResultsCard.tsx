@@ -63,6 +63,7 @@ import {
   type MeasurementState,
   type ProfileSample,
   type VolumeBasePlane,
+  type InspectorDataView,
 } from '@/store/viewerStore';
 import {
   computeBearingDeg,
@@ -71,6 +72,7 @@ import {
   formatArea,
   formatDistance,
   formatVolume,
+  sampleTerrainAlongPolyline,
 } from '@/lib/cesium/measurementPrimitives';
 import {
   bboxSpan,
@@ -1333,6 +1335,15 @@ const TOOL_META: Record<string, { icon: React.ReactNode; label: string }> = {
   'cross-section': { icon: <Mountain className="size-4" />, label: 'Cross-section' },
 };
 
+/** Data-view dropdown options for the inspector card. */
+const DATA_VIEW_OPTIONS: { value: InspectorDataView; label: string }[] = [
+  { value: 'distance', label: 'Distance' },
+  { value: 'area', label: 'Area' },
+  { value: 'volume', label: 'Volume' },
+  { value: 'profile', label: 'Profile' },
+  { value: 'cross-section', label: 'Cross-section' },
+];
+
 export const MeasurementResultsCard: React.FC<Props> = ({
   projectId,
   viewerRef,
@@ -1342,6 +1353,11 @@ export const MeasurementResultsCard: React.FC<Props> = ({
   const clearMeasurement = useViewerStore((s) => s.clearMeasurement);
   const clearProfile = useViewerStore((s) => s.clearProfile);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
+  const inspectorDataView = useViewerStore((s) => s.inspectorDataView);
+  const setInspectorDataView = useViewerStore((s) => s.setInspectorDataView);
+  const setMeasurement = useViewerStore((s) => s.setMeasurement);
+  const recomputeVolume = useViewerStore((s) => s.recomputeVolume);
+  const setProfileSamples = useViewerStore((s) => s.setProfileSamples);
 
   const tool = measurement.tool;
   const hasMeasurement =
@@ -1354,6 +1370,79 @@ export const MeasurementResultsCard: React.FC<Props> = ({
     clearMeasurement();
     clearProfile();
     setActiveTool('select');
+  };
+
+  /** The dropdown is a *display* toggle for most views — it controls
+   *  which sub-view renders without touching the drawn geometry.
+   *
+   *  Exceptions that need activeTool changes:
+   *    • Volume  — triggers terrain sampling (computeVolumeFromTerrain)
+   *    • Profile / Cross-section — activates useProfileHandler which
+   *      sets up the polyline drawing + terrain sampling pipeline */
+  const handleDataViewChange = async (next: InspectorDataView) => {
+    setInspectorDataView(next);
+
+    // Volume: seed measurement as volume tool and run terrain sampling.
+    if (
+      next === 'volume' &&
+      hasMeasurement &&
+      measurement.points.length >= 3 &&
+      measurement.tool !== 'volume'
+    ) {
+      const points = measurement.points;
+      const area = measurement.areaSquareMeters;
+      setMeasurement({
+        tool: 'volume',
+        status: 'complete',
+        points,
+        areaSquareMeters: area,
+      });
+      const viewer = viewerRef.current;
+      if (viewer) {
+        toast.info('Computing volume from terrain…');
+        setTimeout(async () => {
+          try {
+            await recomputeVolume(viewer, { basePlane: 'avg' });
+          } catch (err) {
+            toast.error('Could not compute volume.', {
+              description: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }, 0);
+      }
+      return;
+    }
+
+    // Profile / Cross-section: sample terrain along the existing drawn
+    // line points directly, without changing activeTool (which would
+    // reset the drawing). Write results to profile.samples so the
+    // ProfileSubView renders immediately.
+    if (next === 'profile' || next === 'cross-section') {
+      if (hasMeasurement && measurement.points.length >= 2) {
+        const viewer = viewerRef.current;
+        if (viewer) {
+          const carts = measurement.points.map((p) =>
+            Cartesian3.fromDegrees(p.longitude, p.latitude, p.height),
+          );
+          toast.info(`Sampling terrain for ${next === 'cross-section' ? 'cross-section' : 'profile'}…`);
+          try {
+            const samples = await sampleTerrainAlongPolyline(viewer, carts, 200);
+            if (samples.length > 0) {
+              setProfileSamples(samples, next === 'cross-section' ? 'cross-section' : 'profile');
+            }
+          } catch (err) {
+            toast.error('Could not sample terrain.', {
+              description: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+      }
+      return;
+    }
+
+    // If navigating AWAY from profile/cross-section, clear the profile data
+    // so the ProfileChart modal closes.
+    clearProfile();
   };
 
   // Build unified subtitle: live status hint for the primary tool.
@@ -1382,66 +1471,66 @@ export const MeasurementResultsCard: React.FC<Props> = ({
     return undefined;
   })();
 
-  // Unified icon: primary tool icon, or Compass when profile-only.
+  // Unified icon: use the data-view icon, or Compass fallback.
   const activeMeta =
-    (hasMeasurement && tool ? TOOL_META[tool] : null) ??
+    TOOL_META[inspectorDataView] ??
     (hasProfile ? TOOL_META[profile.mode] : null) ?? { icon: <Compass className="size-4" />, label: 'Measurements' };
-
-  const showMultiple = hasMeasurement && hasProfile;
 
   return (
     <div className="rounded-sm border border-accent/30 bg-accent/[0.06] p-3 space-y-3">
-      {/* Single unified header */}
+      {/* Header + data view dropdown */}
       <CardHeader
         icon={activeMeta.icon}
-        title={showMultiple ? 'Measurements' : activeMeta.label}
+        title={activeMeta.label}
         subtitle={subtitle}
         onClear={handleClear}
       />
 
-      {hasMeasurement && tool === 'distance' && (
-        <>
-          {showMultiple && (
-            <SectionLabel icon={<Ruler className="size-3" />} label="Distance" />
-          )}
-          <DistanceSubView measurement={measurement} />
-        </>
+      {/* Data view selector dropdown */}
+      <div className="space-y-1">
+        <label
+          htmlFor="inspector-data-view"
+          className="block text-[9px] uppercase tracking-[0.12em] text-text-muted"
+        >
+          Data view
+        </label>
+        <select
+          id="inspector-data-view"
+          value={inspectorDataView}
+          onChange={(e) => handleDataViewChange(e.target.value as InspectorDataView)}
+          className="h-7 w-full rounded-sm border border-border-subtle bg-bg-elevated px-2 text-[11px] text-text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
+        >
+          {DATA_VIEW_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Sub-views rendered based on inspectorDataView */}
+      {hasMeasurement && inspectorDataView === 'distance' && (
+        <DistanceSubView measurement={measurement} />
       )}
 
-      {hasMeasurement && tool === 'area' && (
-        <>
-          {showMultiple && (
-            <SectionLabel icon={<Square className="size-3" />} label="Area" />
-          )}
-          <AreaSubView measurement={measurement} />
-        </>
+      {hasMeasurement && inspectorDataView === 'area' && (
+        <AreaSubView measurement={measurement} />
       )}
 
-      {hasMeasurement && tool === 'volume' && (
-        <>
-          {showMultiple && (
-            <SectionLabel icon={<Hexagon className="size-3" />} label="Volume" />
-          )}
-          <VolumeSubView
-            measurement={measurement}
-            projectId={projectId}
-            viewerRef={viewerRef}
-          />
-        </>
+      {hasMeasurement && inspectorDataView === 'volume' && (
+        <VolumeSubView
+          measurement={measurement}
+          projectId={projectId}
+          viewerRef={viewerRef}
+        />
       )}
 
-      {hasProfile && profile.samples && (
-        <>
-          <SectionLabel
-            icon={<Mountain className="size-3" />}
-            label={profile.mode === 'cross-section' ? 'Cross-section' : 'Elevation profile'}
-          />
-          <ProfileSubView
-            samples={profile.samples}
-            mode={profile.mode}
-            viewerRef={viewerRef}
-          />
-        </>
+      {(inspectorDataView === 'profile' || inspectorDataView === 'cross-section') && hasProfile && profile.samples && (
+        <ProfileSubView
+          samples={profile.samples}
+          mode={inspectorDataView === 'cross-section' ? 'cross-section' : 'profile'}
+          viewerRef={viewerRef}
+        />
       )}
     </div>
   );

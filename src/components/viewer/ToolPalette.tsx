@@ -5,14 +5,13 @@ import {
   Columns2,
   Hexagon,
   MousePointer2,
-  Mountain,
   Pencil,
   PenTool,
   Ruler,
+  Slash,
   Square,
-  TrendingUp,
 } from 'lucide-react';
-import { useViewerStore, type ToolMode } from '@/store/viewerStore';
+import { useViewerStore, type MeasureShape } from '@/store/viewerStore';
 import { useToolModeActions, type ModeId } from '@/hooks/useToolModeActions';
 import { cn } from '@/lib/utils';
 
@@ -26,7 +25,7 @@ interface ModeDef {
 }
 
 interface MeasureSubmode {
-  id: ToolMode;
+  id: MeasureShape;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   shortcut: string;
@@ -40,12 +39,13 @@ const MODES: ModeDef[] = [
   { id: 'annotate', label: 'Annotate', icon: Pencil, shortcut: 'A', enabled: true, hint: 'Drop a labeled pin on the canvas' },
 ];
 
+/** Drawing-shape submodes — replace the old 5 measurement-type buttons.
+ *  The data view (distance / area / volume / profile / section) is now
+ *  selected via a dropdown in the inspector card. */
 const MEASURE_SUBMODES: MeasureSubmode[] = [
-  { id: 'distance', label: 'Distance', icon: Ruler, shortcut: '1' },
-  { id: 'area', label: 'Area', icon: Square, shortcut: '2' },
-  { id: 'volume', label: 'Volume', icon: Hexagon, shortcut: '3' },
-  { id: 'profile', label: 'Profile', icon: TrendingUp, shortcut: '4' },
-  { id: 'cross-section', label: 'Section', icon: Mountain, shortcut: '5' },
+  { id: 'line', label: 'Line', icon: Slash, shortcut: '1' },
+  { id: 'square', label: 'Square', icon: Square, shortcut: '2' },
+  { id: 'polygon', label: 'Polygon', icon: Hexagon, shortcut: '3' },
 ];
 
 /**
@@ -97,6 +97,8 @@ export const ToolPalette: React.FC = () => {
   } = useToolModeActions();
 
   const profileActive = activeTool === 'profile' || activeTool === 'cross-section';
+  const measureShape = useViewerStore((s) => s.measureShape);
+  const setMeasureShapeStore = useViewerStore((s) => s.setMeasureShape);
 
   // Esc returns to Select. (Event listener — not setState in effect.)
   // Kept here (not in `useViewerHotkeys`) on purpose: ToolPalette already
@@ -121,7 +123,7 @@ export const ToolPalette: React.FC = () => {
   const activeHint = drawActive
     ? { Icon: PenTool, text: 'Click vertices · double-click to finish · Esc to cancel' }
     : profileActive
-      ? { Icon: TrendingUp, text: 'Click ≥2 points · double-click to sample · Esc to cancel' }
+      ? { Icon: Ruler, text: 'Click ≥2 points · double-click to sample · Esc to cancel' }
       : annotateActive
         ? { Icon: Pencil, text: 'Click to drop a pin · Esc to cancel' }
         : null;
@@ -189,20 +191,21 @@ export const ToolPalette: React.FC = () => {
           <>
             <div className="mx-1 h-5 w-px bg-white/10" aria-hidden />
             {MEASURE_SUBMODES.map(({ id, label, icon: Icon, shortcut }) => {
-              const active = activeTool === id;
+              const active = measureShape === id;
               return (
                 <button
                   key={id}
                   type="button"
-                  onClick={() => setMeasureSubmode(id)}
+                  onClick={() => {
+                    setMeasureShapeStore(id);
+                    // Map shape to the drawing activeTool
+                    const toolMode = id === 'line' ? 'distance' : 'area';
+                    setMeasureSubmode(toolMode);
+                  }}
                   title={`${label} · ${shortcut}`}
                   aria-label={label}
                   aria-pressed={active}
                   className={cn(
-                    // Submodes commit harder than top-level verbs — once the
-                    // user is *in* a measure tool, the active sub-tool needs
-                    // to be unmistakable. Matches Blend presets and Heatmap-
-                    // mode chips elsewhere on the canvas.
                     'inline-flex size-8 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/60',
                     active
                       ? 'bg-accent text-bg-base'

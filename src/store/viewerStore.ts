@@ -25,6 +25,8 @@ export type ToolMode =
   | 'profile'
   | 'cross-section'
   | 'annotate';
+export type MeasureShape = 'line' | 'square' | 'polygon';
+export type InspectorDataView = 'distance' | 'area' | 'volume' | 'profile' | 'cross-section';
 export type BlendPreset = 'stacked' | 'embedded';
 export type RightRailTab = 'overview' | 'layers' | 'inspector' | 'measurements' | 'compare' | 'bookmarks';
 export type RailRevealReason =
@@ -142,6 +144,12 @@ export interface ViewerState {
   // Active tool
   activeTool: ToolMode;
   setActiveTool: (tool: ToolMode) => void;
+
+  // Shape-based measure mode — decouples drawing shape from data view.
+  measureShape: MeasureShape;
+  setMeasureShape: (shape: MeasureShape) => void;
+  inspectorDataView: InspectorDataView;
+  setInspectorDataView: (view: InspectorDataView) => void;
 
   // Performance Controls
   pointBudget: number;
@@ -511,6 +519,10 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   layers: initialLayers,
   terrainMode: 'dtm',
   activeTool: 'select',
+  measureShape: 'polygon',
+  setMeasureShape: (measureShape) => set({ measureShape }),
+  inspectorDataView: 'area',
+  setInspectorDataView: (inspectorDataView) => set({ inspectorDataView }),
 
   pointBudget: 5000000,
   setPointBudget: (budget) => set({ pointBudget: budget }),
