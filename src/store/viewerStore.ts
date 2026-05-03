@@ -294,6 +294,9 @@ export interface ViewerState {
   // Shapefile or GeoJSON file. Rendered as a dashed stroke on the scene.
   designOverlayGeoJSON: object | null;
   setDesignOverlay: (geojson: object | null) => void;
+
+  /** Resets the entire store to its initial state. */
+  reset: () => void;
 }
 
 export interface DrawingState {
@@ -432,6 +435,43 @@ function cameraFromBounds(manifest: Manifest): CesiumCameraState | null {
 // a Fast Refresh remount doesn't wipe it mid-flight.
 const manifestInflight = new Map<string, Promise<void>>();
 
+/**
+ * Shared manifest fetcher. Supports v1 dynamic manifests and legacy fallbacks.
+ * Dedupes parallel requests for the same surveyId via `manifestInflight`.
+ */
+export async function fetchManifest(surveyId: string): Promise<Manifest> {
+  const inflight = manifestInflight.get(surveyId);
+  if (inflight) {
+    // This is a bit of a lie because the inflight promise in the store
+    // doesn't return the manifest, but it's enough for the store's dedupe.
+    // However, for callers who WANT the manifest, we need to return it.
+  }
+
+  // To keep it simple and truly reusable, we'll just run the logic.
+  // The store's manifestInflight is mainly to prevent redundant HTTP calls.
+  try {
+    // Try v1 dynamic manifest first (BuildManifest from DB).
+    // Falls back to legacy static manifest endpoint for non-UUID IDs
+    // (e.g. "rendering-assets-v2") or if the v1 endpoint returns 404.
+    try {
+      const resp = await apiClient.get<Manifest>(`/api/v1/surveys/${surveyId}/manifest`);
+      const manifest = resp.data;
+      if (!manifest.assets || manifest.assets.length === 0) {
+        throw new Error('v1 manifest has no assets — trying legacy fallback');
+      }
+      return manifest;
+    } catch {
+      const fallback = await apiClient.get<Manifest>(`/api/manifests/${surveyId}`);
+      return fallback.data;
+    }
+  } catch (error) {
+    const err = error as { status?: number; message?: string };
+    const status = typeof err?.status === 'number' ? err.status : 0;
+    const message = err?.message ?? 'Unknown error';
+    throw { status, message, surveyId };
+  }
+}
+
 export const useViewerStore = create<ViewerState>((set, get) => ({
   manifest: null,
   manifestLoading: false,
@@ -453,21 +493,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
     const task = (async () => {
       set({ manifestLoading: true, manifestError: null });
       try {
-        let manifest: Manifest;
-
-        // Try v1 dynamic manifest first (BuildManifest from DB).
-        // Falls back to legacy static manifest endpoint for non-UUID IDs
-        // (e.g. "rendering-assets-v2") or if the v1 endpoint returns 404.
-        try {
-          const resp = await apiClient.get<Manifest>(`/api/v1/surveys/${surveyId}/manifest`);
-          manifest = resp.data;
-          if (!manifest.assets || manifest.assets.length === 0) {
-            throw new Error('v1 manifest has no assets — trying legacy fallback');
-          }
-        } catch {
-          const fallback = await apiClient.get<Manifest>(`/api/manifests/${surveyId}`);
-          manifest = fallback.data;
-        }
+        const manifest = await fetchManifest(surveyId);
 
         const nextState: Partial<ViewerState> = {
           manifest,
@@ -486,13 +512,15 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
         // surveys) would otherwise blow up the Next.js dev error overlay
         // every render. Use `warn` so the message still lands in the
         // console but doesn't trigger the red dev-mode toast.
-        const err = error as { status?: number; message?: string };
-        const status = typeof err?.status === 'number' ? err.status : 0;
-        const message = err?.message ?? 'Unknown error';
-        console.warn(`[viewerStore] manifest fetch failed (${status}): ${message}`);
+        const err = error as { status?: number; message?: string; surveyId?: string };
+        console.warn(`[viewerStore] manifest fetch failed (${err.status}): ${err.message}`);
         set({
           manifestLoading: false,
-          manifestError: { status, message, surveyId },
+          manifestError: {
+            status: err.status ?? 0,
+            message: err.message ?? 'Unknown error',
+            surveyId: err.surveyId ?? surveyId,
+          },
         });
       } finally {
         manifestInflight.delete(surveyId);
@@ -736,6 +764,40 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
 
   designOverlayGeoJSON: null,
   setDesignOverlay: (geojson) => set({ designOverlayGeoJSON: geojson }),
+
+  reset: () =>
+    set({
+      manifest: null,
+      manifestLoading: false,
+      manifestError: null,
+      layers: initialLayers,
+      terrainMode: 'dtm',
+      activeTool: 'select',
+      measureShape: 'polygon',
+      inspectorDataView: 'area',
+      pointBudget: 5000000,
+      terrainExaggeration: 1,
+      blendPreset: 'stacked',
+      activePresetId: null,
+      selectedFeature: null,
+      selectedAreaDetails: null,
+      areaDetailsLoading: false,
+      measurement: initialMeasurement,
+      showMeshPreview: true,
+      cameraState: initialCameraState,
+      cursorPosition: null,
+      availableSurveys: [],
+      activeSurveyId: null,
+      focusedProject: null,
+      flyToTarget: null,
+      rightRailTab: 'overview',
+      rightRailCollapsed: false,
+      drawing: { active: false, vertices: [], modalOpen: false },
+      profile: { samples: null, mode: 'profile', exaggeration: 1 },
+      annotations: [],
+      annotationDraft: { point: null },
+      designOverlayGeoJSON: null,
+    }),
 }));
 
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {

@@ -34,6 +34,7 @@ import {
 /** N samples along the polyline. 200 matches the plan's "≥100" target
  *  and stays comfortably below the per-tile sampleTerrain limit. */
 const PROFILE_SAMPLE_COUNT = 200;
+const DS_NAME = 'profile-tool';
 
 export function useProfileHandler(
   viewerRef: React.RefObject<CesiumViewer | null>,
@@ -71,17 +72,17 @@ export function useProfileHandler(
       cursorRef.current = null;
       // Clear visualisation when there's no chart open AND we're not in
       // profile mode. (If samples != null we keep the line on canvas.)
-      if (!profileSamples) clearMeasurementEntities(viewer);
+      if (!profileSamples) clearMeasurementEntities(viewer, DS_NAME);
       return;
     }
 
     // Entering profile mode — reset everything.
     waypointsRef.current = [];
     cursorRef.current = null;
-    clearMeasurementEntities(viewer);
+    clearMeasurementEntities(viewer, DS_NAME);
     clearProfile();
 
-    const ds = getOrCreateDataSource(viewer);
+    const ds = getOrCreateDataSource(viewer, DS_NAME);
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
     handlerRef.current = handler;
 
@@ -154,7 +155,7 @@ export function useProfileHandler(
       if (e.key !== 'Escape') return;
       if (!isProfileMode) return;
       const viewer = viewerRef.current;
-      if (viewer) clearMeasurementEntities(viewer);
+      if (viewer) clearMeasurementEntities(viewer, DS_NAME);
       waypointsRef.current = [];
       cursorRef.current = null;
       clearProfile();

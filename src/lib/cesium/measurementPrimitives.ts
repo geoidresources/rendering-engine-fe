@@ -18,6 +18,9 @@ import {
   sampleTerrainMostDetailed,
   EllipsoidTerrainProvider,
   defined,
+  ClassificationType,
+  ArcType,
+  ColorMaterialProperty,
   type Property,
   type Viewer as CesiumViewer,
 } from 'cesium';
@@ -475,16 +478,23 @@ export function formatVolume(m3: number): string {
 
 // ===================== Entity Drawing Helpers =====================
 
-export function getOrCreateDataSource(viewer: CesiumViewer): CustomDataSource {
-  const existing = viewer.dataSources.getByName(DS_NAME);
+export function getOrCreateDataSource(
+  viewer: CesiumViewer,
+  dsName: string = DS_NAME,
+): CustomDataSource {
+  const existing = viewer.dataSources.getByName(dsName);
   if (existing.length > 0) return existing[0] as CustomDataSource;
-  const ds = new CustomDataSource(DS_NAME);
+  const ds = new CustomDataSource(dsName);
   viewer.dataSources.add(ds);
   return ds;
 }
 
-export function clearMeasurementEntities(viewer: CesiumViewer): void {
-  const existing = viewer.dataSources.getByName(DS_NAME);
+export function clearMeasurementEntities(
+  viewer: CesiumViewer | null,
+  dsName: string = DS_NAME,
+): void {
+  if (!viewer) return;
+  const existing = viewer.dataSources.getByName(dsName);
   if (existing.length > 0) {
     (existing[0] as CustomDataSource).entities.removeAll();
   }
@@ -535,9 +545,11 @@ export function createLivePolyline(
   ds.entities.add({
     polyline: {
       positions: new CallbackProperty(getPositions, false) as unknown as Property,
-      width: 2,
-      material: LINE_COLOR,
+      width: 4,
+      material: new ColorMaterialProperty(LINE_COLOR),
+      depthFailMaterial: new ColorMaterialProperty(LINE_COLOR),
       clampToGround: true,
+      arcType: ArcType.GEODESIC,
     },
   });
 }
@@ -551,11 +563,13 @@ export function createLivePolygon(
     polygon: {
       hierarchy: new CallbackProperty(() => {
         const pts = getPositions();
-        return pts.length >= 3 ? new PolygonHierarchy(pts) : new PolygonHierarchy([]);
+        if (pts.length < 3) return new PolygonHierarchy([]);
+        return new PolygonHierarchy(pts);
       }, false) as unknown as Property,
       show: new CallbackProperty(() => getPositions().length >= 3, false) as unknown as Property,
-      material: POLYGON_FILL,
-      heightReference: HeightReference.CLAMP_TO_GROUND,
+      material: new ColorMaterialProperty(POLYGON_FILL),
+      classificationType: ClassificationType.BOTH,
+      perPositionHeight: false,
     },
   });
 }

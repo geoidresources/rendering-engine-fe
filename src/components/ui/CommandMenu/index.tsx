@@ -95,16 +95,16 @@ export default function CommandMenu({ open, onOpenChange }: CommandMenuProps) {
                 New upload
                 <CommandShortcut>G U</CommandShortcut>
               </CommandItem>
-              <CommandItem onSelect={() => go("/reports")}>
+              {/* <CommandItem onSelect={() => go('/reports')}>
                 <FileBarChart />
                 Reports
                 <CommandShortcut>G R</CommandShortcut>
-              </CommandItem>
-              <CommandItem onSelect={() => go("/qa")}>
+              </CommandItem> */}
+              {/* <CommandItem onSelect={() => go('/qa')}>
                 <CheckSquare />
                 QA queue
                 <CommandShortcut>G Q</CommandShortcut>
-              </CommandItem>
+              </CommandItem> */}
               <CommandItem onSelect={() => go("/reconciliation")}>
                 <GitCompare />
                 Reconciliation

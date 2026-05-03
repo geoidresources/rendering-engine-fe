@@ -10,6 +10,8 @@ import { assetSvcClient } from "@/lib/http";
 import Link from "next/link";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { toast } from "sonner";
+
 type SurveyStatus = "pending" | "under_qa" | "ready_to_approve" | "approved" | "completed";
 
 const STATUS_COLUMNS: { key: SurveyStatus[]; label: string; variant: "alert" | "active" | "standby" }[] = [
@@ -31,14 +33,17 @@ export default function QAPage() {
 
   const updateSurveyStatus = async (surveyId: string, newStatus: string) => {
     setActionLoading(surveyId);
+    const statusLabel = newStatus.replace(/_/g, " ").toUpperCase();
     try {
       // asset-svc mounts routes under /asset-svc/api/v1/... (see
       // consts.RoutePrefix in the Go service); the status-only PATCH lives at
       // /surveys/:id/status and emits a qa_audit_log row server-side.
       await assetSvcClient.patch(`/asset-svc/api/v1/surveys/${surveyId}/status`, { status: newStatus });
       queryClient.invalidateQueries({ queryKey: ["surveys"] });
+      toast.success(`Survey moved to ${statusLabel}`);
     } catch (e) {
       console.error("Failed to update survey status:", e);
+      toast.error(`Failed to update survey status: ${e instanceof Error ? e.message : "Unknown error"}`);
     } finally {
       setActionLoading(null);
     }

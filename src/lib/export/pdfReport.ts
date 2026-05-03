@@ -38,8 +38,6 @@ export interface ReportData {
 export async function generatePDFReport(data: ReportData): Promise<string | true> {
   try {
     // Dynamic import to avoid bundling jspdf unless actually used.
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore - jspdf is an optional peer dependency; install with: pnpm add jspdf
     const { default: jsPDF } = await import('jspdf');
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });

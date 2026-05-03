@@ -1886,18 +1886,18 @@ function ShortcutRow() {
         <FileDown className="size-3.5" />
         {exporting ? "Exporting…" : "Export inventory"}
       </Button>
-      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/qa" />}>
+      {/* <Button variant='outline' size='sm' nativeButton={false} render={<Link href='/qa' />}>
         <ShieldCheck className="size-3.5" />
         QA review
-      </Button>
+      </Button> */}
       <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/viewer-3d" />}>
         <Box className="size-3.5" />
         3D viewer
       </Button>
-      <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/reports" />}>
+      {/* <Button variant='outline' size='sm' nativeButton={false} render={<Link href='/reports' />}>
         <BarChart3 className="size-3.5" />
         Analytics
-      </Button>
+      </Button> */}
     </section>
   );
 }

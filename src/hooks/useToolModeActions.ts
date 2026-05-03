@@ -22,7 +22,7 @@
 import { useViewerStore, type ToolMode } from '@/store/viewerStore';
 import { useCompareStore } from '@/store/compareStore';
 
-export type ModeId = 'select' | 'measure' | 'draw' | 'compare' | 'annotate';
+export type ModeId = 'select' | 'measure' | 'compare' | 'annotate';
 
 export interface ToolModeActions {
   /** Run the click/keypress action for one of the five top-level modes. */
@@ -31,8 +31,6 @@ export interface ToolModeActions {
   setMeasureSubmode: (id: ToolMode) => void;
   /** True when any measure tool — including profile/cross-section — is the active tool. */
   measureActive: boolean;
-  /** True for the polygon-draw tool. */
-  drawActive: boolean;
   /** True for the annotation-pin tool. */
   annotateActive: boolean;
   /** Mirrors `compareStore.enabled` so callers don't have to subscribe twice. */
@@ -53,7 +51,6 @@ export function useToolModeActions(): ToolModeActions {
     activeTool === 'volume' ||
     activeTool === 'profile' ||
     activeTool === 'cross-section';
-  const drawActive = activeTool === 'draw-polygon';
   const annotateActive = activeTool === 'annotate';
 
   const activateMode = (id: ModeId) => {
@@ -76,14 +73,27 @@ export function useToolModeActions(): ToolModeActions {
       return;
     }
     if (id === 'compare') {
+      // Seed epochs if missing before toggling.
+      const currentCmp = useCompareStore.getState();
+      if (!currentCmp.epochA || !currentCmp.epochB) {
+        const v = useViewerStore.getState();
+        const activeSid = v.manifest?.surveyId;
+        if (activeSid) {
+          // Find the active survey in the project timeline and pick its predecessor.
+          const idx = v.availableSurveys.findIndex((s) => s.id === activeSid);
+          const baseline =
+            idx > 0
+              ? v.availableSurveys[idx - 1].id // Preceding survey
+              : idx < v.availableSurveys.length - 1
+                ? v.availableSurveys[idx + 1].id // Succeeding survey if first
+                : activeSid; // Fallback to same survey
+          const compare = activeSid;
+
+          currentCmp.setEpochs(baseline, compare);
+        }
+      }
       toggleCompare();
       revealRailFor('compare-on');
-      return;
-    }
-    if (id === 'draw') {
-      // Toggle behaviour — clicking Draw again returns to Select so the
-      // user can bail without reaching for the keyboard.
-      setActiveTool(drawActive ? 'select' : 'draw-polygon');
       return;
     }
     if (id === 'annotate') {
@@ -104,7 +114,6 @@ export function useToolModeActions(): ToolModeActions {
     activateMode,
     setMeasureSubmode,
     measureActive,
-    drawActive,
     annotateActive,
     compareEnabled,
   };

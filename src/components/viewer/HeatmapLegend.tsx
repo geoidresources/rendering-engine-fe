@@ -7,13 +7,18 @@
 import React from 'react';
 import FloatingPanel from '@/components/ui/FloatingPanel';
 import { useViewerStore } from '@/store/viewerStore';
+import { useCompareStore } from '@/store/compareStore';
 
 export const HeatmapLegend: React.FC = () => {
   const visible = useViewerStore((s) => s.layers.heatmap.visible);
-  const manifest = useViewerStore((s) => s.manifest);
+  const compareEnabled = useCompareStore((s) => s.enabled);
+  const compareMode = useCompareStore((s) => s.mode);
+  const manifestB = useCompareStore((s) => s.manifestB);
+  const mainManifest = useViewerStore((s) => s.manifest);
 
   if (!visible) return null;
 
+  const manifest = (compareEnabled && compareMode === 'diff') ? manifestB : mainManifest;
   const heatmapAsset = manifest?.assets?.find((a) => a.assetType === 'heatmap');
   const zRange = heatmapAsset?.zRange;
   const minLabel = zRange ? `${zRange[0].toFixed(1)}m` : 'Cut';

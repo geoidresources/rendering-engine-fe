@@ -34,7 +34,6 @@ interface MeasureSubmode {
 const MODES: ModeDef[] = [
   { id: 'select', label: 'Select', icon: MousePointer2, shortcut: 'V', enabled: true },
   { id: 'measure', label: 'Measure', icon: Ruler, shortcut: 'M', enabled: true },
-  { id: 'draw', label: 'Draw', icon: PenTool, shortcut: 'D', enabled: true, hint: 'Draw a polygon region — saves as a stockpile' },
   { id: 'compare', label: 'Compare', icon: Columns2, shortcut: 'C', enabled: true },
   { id: 'annotate', label: 'Annotate', icon: Pencil, shortcut: 'A', enabled: true, hint: 'Drop a labeled pin on the canvas' },
 ];
@@ -91,7 +90,6 @@ export const ToolPalette: React.FC = () => {
     activateMode,
     setMeasureSubmode,
     measureActive,
-    drawActive,
     annotateActive,
     compareEnabled,
   } = useToolModeActions();
@@ -120,13 +118,11 @@ export const ToolPalette: React.FC = () => {
   // Find the active hint (only one mode shows a hint at a time, by
   // construction — Draw / Profile / Annotate are mutually exclusive
   // since they all map to a single `activeTool`).
-  const activeHint = drawActive
-    ? { Icon: PenTool, text: 'Click vertices · double-click to finish · Esc to cancel' }
-    : profileActive
-      ? { Icon: Ruler, text: 'Click ≥2 points · double-click to sample · Esc to cancel' }
-      : annotateActive
-        ? { Icon: Pencil, text: 'Click to drop a pin · Esc to cancel' }
-        : null;
+  const activeHint = profileActive
+    ? { Icon: Ruler, text: 'Click ≥2 points · double-click to sample · Esc to cancel' }
+    : annotateActive
+      ? { Icon: Pencil, text: 'Click to drop a pin · Esc to cancel' }
+      : null;
 
   return (
     // Single anchored container. `left-3 / top-3` hugs the corner more
@@ -153,7 +149,6 @@ export const ToolPalette: React.FC = () => {
           const isActive =
             (id === 'select' && activeTool === 'select' && !compareEnabled) ||
             (id === 'measure' && measureActive) ||
-            (id === 'draw' && drawActive) ||
             (id === 'compare' && compareEnabled) ||
             (id === 'annotate' && annotateActive);
           return (

@@ -45,10 +45,9 @@ import { useViewerStore } from '@/store/viewerStore';
 import { useToolModeActions } from '@/hooks/useToolModeActions';
 import type { ToolMode, RightRailTab, MeasureShape } from '@/store/viewerStore';
 
-const MODE_KEY_MAP: Record<string, 'select' | 'measure' | 'draw' | 'compare' | 'annotate'> = {
+const MODE_KEY_MAP: Record<string, 'select' | 'measure' | 'compare' | 'annotate'> = {
   KeyV: 'select',
   KeyM: 'measure',
-  KeyD: 'draw',
   KeyC: 'compare',
   KeyA: 'annotate',
 };

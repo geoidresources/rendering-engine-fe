@@ -17,6 +17,7 @@ import { useCompareStore } from '@/store/compareStore';
 import { useViewerStore } from '@/store/viewerStore';
 import { useCutFill } from '@/hooks/useCutFill';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '@/components/ui/skeleton';
 import type { CutFillRecord } from '@/types/api';
 
 type SortKey = 'net' | 'cut' | 'fill';
@@ -305,7 +306,11 @@ export const CompareDock: React.FC = () => {
                 anySuspect ? 'text-text-muted line-through opacity-70' : color,
               )}
             >
-              {isLoading ? '—' : fmtVol(value)}
+              {isLoading ? (
+                <Skeleton className="h-4 w-16 bg-white/10" />
+              ) : (
+                fmtVol(value)
+              )}
             </span>
           </div>
         ))}
@@ -318,9 +323,14 @@ export const CompareDock: React.FC = () => {
             Pick a baseline and comparison epoch above.
           </p>
         ) : isLoading ? (
-          <div className="flex items-center justify-center gap-2 py-3 text-text-muted">
-            <Loader2 className="size-3.5 animate-spin" />
-            <span className="text-[11px]">Loading zones…</span>
+          <div className="flex flex-col gap-1 py-1">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="flex items-center gap-2 px-2 py-1.5">
+                <Skeleton className="size-1.5 rounded-full bg-white/10 shrink-0" />
+                <Skeleton className="h-3 flex-1 bg-white/10" />
+                <Skeleton className="h-3 w-12 bg-white/10" />
+              </div>
+            ))}
           </div>
         ) : error ? (
           <p className="text-[11px] text-red-400 text-center py-3">
@@ -427,6 +437,7 @@ export const CompareSliderOverlay: React.FC = () => {
   const setSplitPosition = useCompareStore((s) => s.setSplitPosition);
   const mode = useCompareStore((s) => s.mode);
   const enabled = useCompareStore((s) => s.enabled);
+  const isLoading = useCompareStore((s) => s.isLoading);
 
   if (!enabled || mode !== 'slider') return null;
 
@@ -468,6 +479,21 @@ export const CompareSliderOverlay: React.FC = () => {
       >
         <MoveHorizontal className="size-3 text-[#111]" />
       </div>
+
+      {/* Loading Skeleton for the comparison side */}
+      {isLoading && (
+        <div 
+          className="absolute inset-y-0 right-0 bg-white/5 animate-pulse flex items-center justify-center"
+          style={{ left: pct }}
+        >
+          <div className="flex flex-col items-center gap-2">
+            <Loader2 className="size-6 text-white/40 animate-spin" />
+            <span className="text-[11px] text-white/40 uppercase tracking-[0.15em] font-medium">
+              Loading Survey...
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Epoch labels */}
       <div

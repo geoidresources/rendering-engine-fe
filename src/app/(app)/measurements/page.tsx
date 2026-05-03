@@ -266,29 +266,47 @@ export default function MeasurementsPage() {
             </div>
           </Card>
 
-          <Card className="rounded-sm ring-0 gap-0 py-0">
-            <CardHeader className="px-6 py-3 border-b">
-              <CardTitle className="text-muted-foreground text-[10px] uppercase tracking-wider font-medium">
-                Quality Metrics
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6">
-              <div className="flex flex-col gap-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">RMS Error</span>
-                  <span className="text-success text-xs font-mono">0.023 m</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">GCP Residual</span>
-                  <span className="text-success text-xs font-mono">0.018 m</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Classification</span>
-                  <Badge variant="active">VERIFIED</Badge>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {(() => {
+            const activeSurvey = surveys?.find((s) => s.id === surveyId);
+            const metadata = activeSurvey?.metadata as Record<string, any> | null;
+            const rms = metadata?.rms_error_m;
+            const gcp = metadata?.gcp_residual_m;
+            const classification = metadata?.classification ?? activeSurvey?.status;
+
+            if (!rms && !gcp && !classification) return null;
+
+            return (
+              <Card className="rounded-sm ring-0 gap-0 py-0">
+                <CardHeader className="px-6 py-3 border-b">
+                  <CardTitle className="text-muted-foreground text-[10px] uppercase tracking-wider font-medium">
+                    Quality Metrics
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <div className="flex flex-col gap-2">
+                    {rms != null && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground text-[10px] uppercase tracking-wider">RMS Error</span>
+                        <span className="text-success text-xs font-mono">{rms.toFixed(3)} m</span>
+                      </div>
+                    )}
+                    {gcp != null && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground text-[10px] uppercase tracking-wider">GCP Residual</span>
+                        <span className="text-success text-xs font-mono">{gcp.toFixed(3)} m</span>
+                      </div>
+                    )}
+                    {classification && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Classification</span>
+                        <Badge variant="active">{String(classification).toUpperCase()}</Badge>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
         </div>
         )}
       </div>

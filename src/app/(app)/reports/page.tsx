@@ -66,9 +66,8 @@ export default function ReportsPage() {
               {TEMPLATES.map((t) => (
                 <div
                   key={t.name}
-                  className={`p-3 rounded-sm border cursor-pointer transition-colors ${
-                    t.active ? "border-accent bg-accent/5" : "border-border-subtle hover:border-text-muted"
-                  }`}
+                  className={`p-3 rounded-sm border cursor-pointer transition-colors ${t.active ? "border-accent bg-accent/5" : "border-border-subtle hover:border-text-muted"
+                    }`}
                 >
                   <p className="text-text-primary text-xs font-semibold uppercase tracking-wider">{t.name}</p>
                   <p className="text-text-muted text-[10px] mt-1">{t.description}</p>

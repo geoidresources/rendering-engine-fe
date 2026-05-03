@@ -32,6 +32,8 @@ import {
   createLivePolygon,
 } from '@/lib/cesium/measurementPrimitives';
 
+const DS_NAME = 'draw-tool';
+
 export function useDrawingHandler(
   viewerRef: React.RefObject<CesiumViewer | null>,
 ) {
@@ -75,16 +77,16 @@ export function useDrawingHandler(
       cursorRef.current = null;
       // Don't clear entities while the modal is up — the user should
       // still see their polygon while typing the name.
-      if (!drawingModalOpen) clearMeasurementEntities(viewer);
+      if (!drawingModalOpen) clearMeasurementEntities(viewer, DS_NAME);
       return;
     }
 
     // Entering draw mode — reset everything.
     cartesianVertsRef.current = [];
     cursorRef.current = null;
-    clearMeasurementEntities(viewer);
+    clearMeasurementEntities(viewer, DS_NAME);
 
-    const ds = getOrCreateDataSource(viewer);
+    const ds = getOrCreateDataSource(viewer, DS_NAME);
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
     handlerRef.current = handler;
 
@@ -146,7 +148,7 @@ export function useDrawingHandler(
       if (e.key !== 'Escape') return;
       if (activeTool !== 'draw-polygon') return;
       const viewer = viewerRef.current;
-      if (viewer) clearMeasurementEntities(viewer);
+      if (viewer) clearMeasurementEntities(viewer, DS_NAME);
       cartesianVertsRef.current = [];
       cursorRef.current = null;
       cancelDrawing();
@@ -162,7 +164,7 @@ export function useDrawingHandler(
     if (drawingModalOpen) return;
     if (activeTool === 'draw-polygon') return;
     const viewer = viewerRef.current;
-    if (viewer) clearMeasurementEntities(viewer);
+    if (viewer) clearMeasurementEntities(viewer, DS_NAME);
     cartesianVertsRef.current = [];
     cursorRef.current = null;
   }, [drawingModalOpen, activeTool, viewerRef]);

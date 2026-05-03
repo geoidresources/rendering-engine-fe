@@ -24,6 +24,8 @@ interface MaterialDensitiesResponse {
   densities: MaterialDensity[];
 }
 
+import { toast } from "sonner";
+
 /**
  * Fetches the live per-tenant material density rows so the
  * MeasurementResultsCard's tonnage estimate reflects the same numbers
@@ -47,24 +49,30 @@ export function useMaterialDensities() {
   return useQuery<MaterialDensity[]>({
     queryKey: ['analytics', 'material-densities'],
     queryFn: async () => {
-      const res = await apiClient.get<MaterialDensitiesResponse>(
-        '/api/v1/analytics/material-densities',
-      );
-      // Same defensive unwrap as useMaterials — tolerate either
-      // envelope-shaped or bare-array responses, return [] on
-      // anything weird so consumers can call .find/.map safely.
-      const raw: unknown = res.data;
-      if (Array.isArray(raw)) return raw as MaterialDensity[];
-      if (
-        raw &&
-        typeof raw === 'object' &&
-        Array.isArray((raw as { densities?: unknown }).densities)
-      ) {
-        return (raw as MaterialDensitiesResponse).densities;
+      try {
+        const res = await apiClient.get<MaterialDensitiesResponse>(
+          '/api/v1/analytics/material-densities',
+        );
+        // Same defensive unwrap as useMaterials — tolerate either
+        // envelope-shaped or bare-array responses, return [] on
+        // anything weird so consumers can call .find/.map safely.
+        const raw: unknown = res.data;
+        if (Array.isArray(raw)) return raw as MaterialDensity[];
+        if (
+          raw &&
+          typeof raw === 'object' &&
+          Array.isArray((raw as { densities?: unknown }).densities)
+        ) {
+          return (raw as MaterialDensitiesResponse).densities;
+        }
+        return [];
+      } catch (e) {
+        console.error("Failed to fetch material densities:", e);
+        throw e;
       }
-      return [];
     },
     staleTime: 5 * 60_000,
+    retry: 1,
   });
 }
 

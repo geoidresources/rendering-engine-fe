@@ -39,8 +39,8 @@ const PRIMARY_ITEMS: RailItem[] = [
   { id: "sites", label: "Sites & Viewer", href: "/project", icon: MapIcon, matchPrefix: "/project", kbd: "G V" },
   { id: "measurements", label: "Measurements", href: "/measurements", icon: BarChart3, kbd: "G M" },
   { id: "uploads", label: "Uploads", href: "/surveys/upload", icon: Upload, matchPrefix: "/surveys", kbd: "G U" },
-  { id: "reports", label: "Reports", href: "/reports", icon: FileBarChart, kbd: "G R" },
-  { id: "qa", label: "QA", href: "/qa", icon: CheckSquare, kbd: "G Q" },
+  // { id: "reports", label: "Reports", href: "/reports", icon: FileBarChart, kbd: "G R" },
+  // { id: "qa", label: "QA", href: "/qa", icon: CheckSquare, kbd: "G Q" },
 ];
 
 const SECONDARY_ITEMS: RailItem[] = [

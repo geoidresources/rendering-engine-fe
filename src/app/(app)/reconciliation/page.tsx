@@ -274,10 +274,6 @@ export default function ReconciliationPage() {
                     {greenUpper}% / {amberUpper}% · {summary?.thresholds.source ?? "default"}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider">System Status</span>
-                  <span className="text-success text-xs font-mono uppercase">All Nodes Nominal</span>
-                </div>
               </div>
             </CardContent>
           </Card>

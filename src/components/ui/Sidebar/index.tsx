@@ -24,8 +24,8 @@ const NAV_ITEMS = [
   { id: "measurements", label: "Measurements", href: "/measurements", icon: Ruler },
   { id: "reconciliation", label: "Reconciliation", href: "/reconciliation", icon: GitCompare },
   { id: "project", label: "Project", href: "/project", icon: Globe, external: true },
-  { id: "reporting", label: "Reporting", href: "/reports", icon: FileBarChart },
-  { id: "qa", label: "QA", href: "/qa", icon: CheckSquare },
+  // { id: "reporting", label: "Reporting", href: "/reports", icon: FileBarChart },
+  // { id: "qa", label: "QA", href: "/qa", icon: CheckSquare },
   { id: "access", label: "Access", href: "/client-portal", icon: Shield },
 ];
 

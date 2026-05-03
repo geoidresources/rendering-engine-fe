@@ -54,6 +54,7 @@ import { useRecentSurveys } from '@/hooks/useRecentSurveys';
 import { useViewerHotkeys } from '@/hooks/useViewerHotkeys';
 import { useViewerUrlSync } from '@/hooks/useViewerUrlSync';
 import { useViewerDefaults } from '@/hooks/useViewerDefaults';
+import { useViewerCompareLayer } from '@/hooks/useViewerCompareLayer';
 import { SaveRegionModal } from '@/components/viewer/SaveRegionModal';
 import { AnnotationModal } from '@/components/viewer/AnnotationModal';
 import { KeyboardShortcutsOverlay } from '@/components/viewer/KeyboardShortcutsOverlay';
@@ -181,6 +182,9 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   // ── Compare store ─────────────────────────────────────────────────
   const compareEnabled = useCompareStore((s) => s.enabled);
   const compareMode = useCompareStore((s) => s.mode);
+  const compareEpochA = useCompareStore((s) => s.epochA);
+  const compareEpochB = useCompareStore((s) => s.epochB);
+  const setCompareEpochs = useCompareStore((s) => s.setEpochs);
   const splitPosition = useCompareStore((s) => s.splitPosition);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -208,6 +212,9 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   // V-STATE-02: persist per-user defaults to localStorage; seed on mount
   // when no ?v= snapshot is present.
   useViewerDefaults();
+
+  // ── Compare: Side-by-side (slider) layer management ───────────────
+  useViewerCompareLayer(viewerRef);
 
   // ── ContextBar wiring ─────────────────────────────────────────────
   const router = useRouter();
@@ -265,6 +272,26 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     params.set('surveyId', siteActiveSurveyId);
     router.replace(`/project?${params.toString()}`);
   }, [siteActiveSurveyId, surveyIdProp, router, searchParams]);
+
+  // V-COMPARE-05: Sync active survey with compare epochs.
+  // When the user clicks a dot in the timeline or picks a survey in the top bar,
+  // we want the Comparison tool to follow. We treat the active survey as 'epochB'
+  // (the comparison) so the user can click through the timeline to see diffs
+  // against their chosen baseline (epochA).
+  useEffect(() => {
+    if (compareEnabled && manifest?.surveyId && manifest.surveyId !== compareEpochB) {
+      setCompareEpochs(compareEpochA, manifest.surveyId);
+    }
+  }, [compareEnabled, manifest?.surveyId, compareEpochA, compareEpochB, setCompareEpochs]);
+
+  // V-COMPARE-06: Sync epochB back to main survey.
+  // When the user picks a different "Compare" epoch in the dock, we want the
+  // main app (and timeline) to reflect that this is the active focus.
+  useEffect(() => {
+    if (compareEnabled && compareEpochB && compareEpochB !== siteActiveSurveyId) {
+      setSiteActiveSurvey(compareEpochB);
+    }
+  }, [compareEnabled, compareEpochB, siteActiveSurveyId, setSiteActiveSurvey]);
 
   // Bind viewMode → Cesium scene morph
   useEffect(() => {
@@ -822,7 +849,8 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     const viewer = viewerRef.current;
     if (!viewer) return;
 
-    if (!orthoUrl || !layers.ortho.visible) {
+    const isSliderCompare = compareEnabled; // Hide main ortho if ANY compare mode is on
+    if (!orthoUrl || !layers.ortho.visible || isSliderCompare) {
       if (orthoLayerRef.current) {
         orthoLayerRef.current.show = false;
         viewer.scene.requestRender();
@@ -849,6 +877,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     orthoLayerRef.current.show = true;
     orthoLayerRef.current.alpha = layers.ortho.opacity;
     viewer.scene.requestRender();
+
+    return () => {
+      if (orthoLayerRef.current && !viewer.isDestroyed()) {
+        viewer.scene.imageryLayers.remove(orthoLayerRef.current);
+        orthoLayerRef.current = null;
+      }
+    };
   }, [orthoUrl, layers.ortho.visible, layers.ortho.opacity, orthoAsset, manifest]);
 
   // ---- Blend Preset (stacked vs embedded imagery compositing) ----
@@ -887,13 +922,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     const viewer = viewerRef.current;
     if (!viewer) return;
 
-    if (!pointCloudTilesetUrl || !layers.laz.visible) {
+    if (!pointCloudTilesetUrl || !layers.laz.visible || compareEnabled) {
       if (tilesetRef.current) {
         tilesetRef.current.show = false;
         viewer.scene.requestRender();
       }
       // Report issues if invisible due to missing url
-      if (layers.laz.visible && !pointCloudTilesetUrl) {
+      if (layers.laz.visible && !pointCloudTilesetUrl && !compareEnabled) {
         setLayerError('laz', 'No 3D Tiles URL found in manifest.');
       }
       return;
@@ -984,8 +1019,14 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       viewer.scene.requestRender();
     }
 
-    return () => { isSubscribed = false; };
-  }, [pointCloudTilesetUrl, layers.laz.visible, layers.laz.opacity, pointBudget, setLayerError, setLayerLoading]);
+    return () => {
+      isSubscribed = false;
+      if (tilesetRef.current && !viewer.isDestroyed()) {
+        viewer.scene.primitives.remove(tilesetRef.current);
+        tilesetRef.current = null;
+      }
+    };
+  }, [pointCloudTilesetUrl, layers.laz.visible, layers.laz.opacity, pointBudget, setLayerError, setLayerLoading, compareEnabled]);
 
   // ---- Dynamic Eye-Dome Lighting (lerp based on camera altitude) ---
   useEffect(() => {
@@ -1066,7 +1107,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
       viewer.scene.requestRender();
     }
 
-    return () => { isSubscribed = false; };
+    return () => {
+      isSubscribed = false;
+      if (vectorDataSourceRef.current && !viewer.isDestroyed()) {
+        viewer.dataSources.remove(vectorDataSourceRef.current);
+        vectorDataSourceRef.current = null;
+      }
+    };
   }, [vectorUrl, layers.polygons.visible, layers.polygons.opacity, setLayerLoading, setLayerError]);
 
   // ---- GLB Site Model ---
@@ -1144,17 +1191,24 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     };
 
     sampleAndPlace();
+
+    return () => {
+      if (modelPrimitiveRef.current && !viewer.isDestroyed()) {
+        viewer.scene.primitives.remove(modelPrimitiveRef.current);
+        modelPrimitiveRef.current = null;
+      }
+    };
   }, [siteModelUrl, layers.site_model.visible, layers.site_model.opacity, terrainMode, terrainUrl, siteCenterLng, siteCenterLat, siteCenterHeight, setLayerLoading, setLayerError]);
 
   // ---- Heatmap (Cut/Fill) Imagery Layer ----
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer) return;
+    if (!viewer || viewer.isDestroyed()) return;
 
-    if (!heatmapUrl || !layers.heatmap.visible) {
+    if (!heatmapUrl || !layers.heatmap.visible || compareEnabled) {
       if (heatmapLayerRef.current) {
-        heatmapLayerRef.current.show = false;
-        viewer.scene.requestRender();
+        viewer.scene.imageryLayers.remove(heatmapLayerRef.current);
+        heatmapLayerRef.current = null;
       }
       return;
     }
@@ -1176,6 +1230,13 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     heatmapLayerRef.current.show = true;
     heatmapLayerRef.current.alpha = layers.heatmap.opacity;
     viewer.scene.requestRender();
+
+    return () => {
+      if (heatmapLayerRef.current && !viewer.isDestroyed()) {
+        viewer.scene.imageryLayers.remove(heatmapLayerRef.current);
+        heatmapLayerRef.current = null;
+      }
+    };
   }, [heatmapUrl, layers.heatmap.visible, layers.heatmap.opacity, heatmapAsset, manifest]);
 
   // ---- Contour Lines (GeoJSON) Layer ----
@@ -1231,7 +1292,14 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     }
 
     viewer.scene.requestRender();
-    return () => { isSubscribed = false; };
+
+    return () => {
+      isSubscribed = false;
+      if (contourDataSourceRef.current && !viewer.isDestroyed()) {
+        viewer.dataSources.remove(contourDataSourceRef.current);
+        contourDataSourceRef.current = null;
+      }
+    };
   }, [contourUrl, layers.contours.visible, layers.contours.opacity, setLayerLoading, setLayerError]);
 
   // ---- Compare: Cesium scene split position ----

@@ -9,7 +9,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import { useSurvey, useSurveyAssets } from "@/hooks/useSurveys";
 import { useQAAuditLog, useQAChecklist } from "@/hooks/useQA";
 
-const TABS = ["Metadata", "Files", "QA Log", "Approval History"];
+const TABS = ["Metadata", "Files", "Approval History"];
 
 export default function SurveyDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -92,7 +92,7 @@ export default function SurveyDetailPage() {
       )}
 
       {/* QA Log Tab */}
-      {activeTab === 2 && (
+      {false && (
         <div className="mt-4 flex flex-col gap-3">
           {(qaLog ?? []).length === 0 ? (
             <Panel><p className="text-text-muted text-sm text-center py-4">No QA log entries yet.</p></Panel>
@@ -121,7 +121,7 @@ export default function SurveyDetailPage() {
       )}
 
       {/* Approval History Tab */}
-      {activeTab === 3 && (
+      {activeTab === 2 && (
         <div className="mt-4 flex flex-col gap-3">
           {(qaLog ?? [])
             .filter((e) => e.action === "status_change")

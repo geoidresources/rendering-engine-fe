@@ -33,6 +33,7 @@ import {
 } from '../lib/cesium/measurementPrimitives';
 import { buildExtrudedStockpileEntity } from '../lib/cesium/stockpilePreviewPrimitive';
 import { materialColor } from '../lib/cesium/materialColor';
+const DS_NAME = 'measure-tool';
 
 export function useMeasurementHandler(
   viewerRef: React.RefObject<CesiumViewer | null>,
@@ -65,25 +66,34 @@ export function useMeasurementHandler(
       activeTool === 'distance' ||
       activeTool === 'area' ||
       activeTool === 'volume';
-    if (!viewer || !isClassicalMeasure) {
+    if (!isClassicalMeasure) {
       if (handlerRef.current) {
         handlerRef.current.destroy();
         handlerRef.current = null;
       }
+      // When leaving the classical measurement tools, wipe the map visuals
+      // and the store state so the next tool starts with a fresh slate.
+      if (viewer) {
+        clearMeasurementEntities(viewer, DS_NAME);
+      }
+      clearMeasurement();
       return;
     }
 
-    // Reset drawing state when entering a measurement tool
+    if (!viewer) return;
+
+    // Always reset drawing state when entering a measurement tool
     verticesRef.current = [];
     cursorRef.current = null;
     isDrawingRef.current = false;
     previewEntityRef.current = null;
-    clearMeasurementEntities(viewer);
+    clearMeasurementEntities(viewer, DS_NAME);
     clearMeasurement();
 
-    const ds = getOrCreateDataSource(viewer);
+    const ds = getOrCreateDataSource(viewer, DS_NAME);
     const handler = new ScreenSpaceEventHandler(viewer.scene.canvas);
     handlerRef.current = handler;
+    viewer.scene.requestRender();
 
     const isPolygonTool = activeTool === 'area' || activeTool === 'volume';
 
@@ -167,6 +177,7 @@ export function useMeasurementHandler(
           areaSquareMeters: computeAreaSquareMeters(preview),
         });
       }
+      viewer.scene.requestRender();
     }, ScreenSpaceEventType.MOUSE_MOVE);
 
     // ---- Finish drawing (RIGHT_CLICK for polygon, DOUBLE_CLICK for distance) ----
@@ -274,7 +285,7 @@ export function useMeasurementHandler(
   useEffect(() => {
     if (measurement.status === 'idle' && measurement.tool === null) {
       const viewer = viewerRef.current;
-      if (viewer) clearMeasurementEntities(viewer);
+      if (viewer) clearMeasurementEntities(viewer, DS_NAME);
       verticesRef.current = [];
       cursorRef.current = null;
       isDrawingRef.current = false;
@@ -290,7 +301,7 @@ export function useMeasurementHandler(
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
-    const ds = getOrCreateDataSource(viewer);
+    const ds = getOrCreateDataSource(viewer, DS_NAME);
 
     const removePreview = () => {
       if (previewEntityRef.current) {
@@ -351,7 +362,7 @@ export function useMeasurementHandler(
   // ---- Public API ----
   const clearDrawing = useCallback(() => {
     const viewer = viewerRef.current;
-    if (viewer) clearMeasurementEntities(viewer);
+    if (viewer) clearMeasurementEntities(viewer, DS_NAME);
     verticesRef.current = [];
     cursorRef.current = null;
     isDrawingRef.current = false;

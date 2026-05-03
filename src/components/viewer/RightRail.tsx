@@ -1116,7 +1116,7 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
                 {material}
               </p>
             </button>
-            {row.qa_status && <QAStatusPill status={row.qa_status} />}
+            {/* row.qa_status && <QAStatusPill status={row.qa_status} /> */}
             {breaches[row.id] && <RegionAlertTooltip breach={breaches[row.id]} />}
             <DropdownMenu>
               <DropdownMenuTrigger

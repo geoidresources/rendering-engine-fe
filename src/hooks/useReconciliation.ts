@@ -55,6 +55,8 @@ export function useReconciliationSummary(projectId: string) {
   });
 }
 
+import { toast } from "sonner";
+
 // Fires the auto-derive + NATS submission. The response lists the workflow
 // IDs that were queued — the caller polls until the summary's `last_run`
 // advances. Invalidates both the list and the summary so every card on the
@@ -70,13 +72,18 @@ export function useRunReconciliation() {
       );
       return res.data;
     },
-    onSuccess: (_data, vars) => {
+    onSuccess: (data, vars) => {
       qc.invalidateQueries({
         queryKey: ["analytics", "reconciliation", vars.projectId],
       });
       qc.invalidateQueries({
         queryKey: ["analytics", "reconciliation", "summary", vars.projectId],
       });
+      const materialLabel = vars.material ? ` for ${vars.material}` : "";
+      toast.success(`Reconciliation triggered${materialLabel}. ${data?.workflow_ids?.length ?? 0} workflows queued.`);
+    },
+    onError: (err) => {
+      toast.error(`Failed to run reconciliation: ${err instanceof Error ? err.message : "Unknown error"}`);
     },
   });
 }
@@ -113,13 +120,17 @@ export function useUpsertThreshold() {
       );
       return res.data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["analytics", "thresholds"] });
       // Thresholds feed the summary's status classification — invalidate so
       // the KPI tiles re-class next poll.
       qc.invalidateQueries({
         queryKey: ["analytics", "reconciliation", "summary"],
       });
+      toast.success(`Thresholds updated for ${vars.metric}`);
+    },
+    onError: (err) => {
+      toast.error(`Failed to update thresholds: ${err instanceof Error ? err.message : "Unknown error"}`);
     },
   });
 }
@@ -132,11 +143,15 @@ export function useDeleteThreshold() {
         `/asset-svc/api/v1/analytics/thresholds/${metric}`,
       );
     },
-    onSuccess: () => {
+    onSuccess: (_data, metric) => {
       qc.invalidateQueries({ queryKey: ["analytics", "thresholds"] });
       qc.invalidateQueries({
         queryKey: ["analytics", "reconciliation", "summary"],
       });
+      toast.success(`Thresholds reset to default for ${metric}`);
+    },
+    onError: (err) => {
+      toast.error(`Failed to reset thresholds: ${err instanceof Error ? err.message : "Unknown error"}`);
     },
   });
 }

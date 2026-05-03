@@ -19,6 +19,7 @@ interface SiteState {
   setActiveSurvey: (surveyId: string | null) => void;
   setViewMode: (mode: ViewMode) => void;
   clearSite: () => void;
+  reset: () => void;
 }
 
 export const useSiteStore = create<SiteState>()(
@@ -53,6 +54,14 @@ export const useSiteStore = create<SiteState>()(
 
       clearSite: () =>
         set({ activeProjectId: null, activeSurveyId: null }),
+
+      reset: () =>
+        set({
+          activeProjectId: null,
+          activeSurveyId: null,
+          viewMode: "3d",
+          recentSites: [],
+        }),
     }),
     {
       name: "geoid.site",

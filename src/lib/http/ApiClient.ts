@@ -75,6 +75,23 @@ export class ApiClient {
           // Clear token on 401 Unauthorized
           if (typeof window !== "undefined") {
             localStorage.removeItem(AUTH_TOKEN_KEY);
+
+            // Global store resets — restore all stateompaitial values
+            // to avoid leaking data between sessions / users.
+            try {
+              const { useSiteStore } = require("../../store/siteStore");
+              const { useUploadStore } = require("../../store/uploadStore");
+              const { useCompareStore } = require("../../store/compareStore");
+              const { useViewerStore } = require("../../store/viewerStore");
+
+              useSiteStore.getState().reset();
+              useUploadStore.getState().reset();
+              useCompareStore.getState().reset();
+              useViewerStore.getState().reset();
+            } catch (e) {
+              console.error("[ApiClient] Store reset failed:", e);
+            }
+
             // Optionally redirect to login if not already there
             if (!window.location.pathname.startsWith("/login")) {
               window.location.href = "/login";
