@@ -22,6 +22,7 @@ import {
   ImageryLayer,
   Model as CesiumModel,
   HeadingPitchRange,
+  BoundingSphere
 } from "cesium";
 import type { MeasurementInventoryItem } from "@/types/api";
 import { materialColor } from "@/lib/cesium/materialColor";
@@ -157,9 +158,10 @@ export default function StockpileMeshPreview({ item }: Props) {
       const parsed = parsePolygon(item.geojson);
       if (!parsed) return;
 
+      const area = item.area_m2 ?? (item.properties?.area_m2 as number);
       const height =
-        item.volume_m3 != null && item.area_m2 != null && item.area_m2 > 0
-          ? item.volume_m3 / item.area_m2
+        item.volume_m3 != null && area != null && area > 0
+          ? item.volume_m3 / area
           : (item.properties?.mean_height_m as number) ?? 0;
 
       const positions = Cartesian3.fromDegreesArray(parsed.flat);
@@ -175,20 +177,22 @@ export default function StockpileMeshPreview({ item }: Props) {
       entityIdRef.current = entity.id;
 
       const [w, s, e, n] = parsed.bbox;
-      const padLng = Math.max(0.00005, (e - w) * 0.25);
-      const padLat = Math.max(0.00005, (n - s) * 0.25);
-      viewer.camera.flyTo({
-        destination: Rectangle.fromDegrees(
-          w - padLng,
-          s - padLat,
-          e + padLng,
-          n + padLat,
+      // Use BoundingSphere for Phase 1 as well — it provides much more 
+      // reliable framing than flyTo(Rectangle).
+      const sphere = BoundingSphere.fromPoints(positions);
+
+      // Center the camera target on the middle of the prism height 
+      // rather than just the footprint (ground) level.
+      const carto = viewer.scene.globe.ellipsoid.cartesianToCartographic(sphere.center);
+      carto.height = height / 2;
+      sphere.center = viewer.scene.globe.ellipsoid.cartographicToCartesian(carto);
+
+      viewer.camera.flyToBoundingSphere(sphere, {
+        offset: new HeadingPitchRange(
+          0,
+          CesiumMath.toRadians(-35),
+          Math.max(sphere.radius * 2.5, 20)
         ),
-        orientation: {
-          heading: 0,
-          pitch: CesiumMath.toRadians(-35),
-          roll: 0,
-        },
         duration: 0.8,
       });
     };
@@ -212,7 +216,11 @@ export default function StockpileMeshPreview({ item }: Props) {
           model.readyEvent.addEventListener(() => {
             if (cancelled || !viewerRef.current || viewerRef.current.isDestroyed()) return;
             viewerRef.current.camera.flyToBoundingSphere(model.boundingSphere, {
-              offset: new HeadingPitchRange(0, CesiumMath.toRadians(-35), 0),
+              offset: new HeadingPitchRange(
+                0,
+                CesiumMath.toRadians(-35),
+                Math.max(model.boundingSphere.radius * 2.5, 20)
+              ),
               duration: 0.8,
             });
             viewerRef.current.scene.requestRender();

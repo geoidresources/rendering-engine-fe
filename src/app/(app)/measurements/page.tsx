@@ -208,161 +208,161 @@ export default function MeasurementsPage() {
           </CardContent>
         </Card>
       ) : (
-      <div className="grid grid-cols-12 gap-4">
-        <div className={hasInventoryData ? "col-span-8" : "col-span-12"}>
-          <Card className="rounded-sm ring-0 gap-0 py-0 overflow-hidden">
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="flex items-center justify-center py-20 text-muted-foreground text-xs">Loading inventory...</div>
-              ) : (
-                <>
-                  <DataTable
-                    columns={columns}
-                    data={(inventory?.items ?? [])
-                      .sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0))
-                      .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) as unknown as Record<string, unknown>[]}
-                    onRowClick={(row) => setSelectedId((row as unknown as MeasurementInventoryItem).id)}
-                  />
-                  {inventory && inventory.items.length > PAGE_SIZE && (
-                    <div className="flex items-center justify-between px-4 py-3 border-t border-border-subtle bg-secondary/30">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
-                        Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, inventory.items.length)} of {inventory.items.length}
+        <div className="grid grid-cols-12 gap-4">
+          <div className={hasInventoryData ? "col-span-8" : "col-span-12"}>
+            <Card className="rounded-sm ring-0 gap-0 py-0 overflow-hidden">
+              <CardContent className="p-0">
+                {isLoading ? (
+                  <div className="flex items-center justify-center py-20 text-muted-foreground text-xs">Loading inventory...</div>
+                ) : (
+                  <>
+                    <DataTable
+                      columns={columns}
+                      data={(inventory?.items ?? [])
+                        .sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0))
+                        .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) as unknown as Record<string, unknown>[]}
+                      onRowClick={(row) => setSelectedId((row as unknown as MeasurementInventoryItem).id)}
+                    />
+                    {inventory && inventory.items.length > PAGE_SIZE && (
+                      <div className="flex items-center justify-between px-4 py-3 border-t border-border-subtle bg-secondary/30">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+                          Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, inventory.items.length)} of {inventory.items.length}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[10px] font-mono"
+                            disabled={page === 1}
+                            onClick={() => setPage(p => p - 1)}
+                          >
+                            <ChevronLeft className="size-3 mr-1" />
+                            PREV
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2 text-[10px] font-mono"
+                            disabled={page >= Math.ceil(inventory.items.length / PAGE_SIZE)}
+                            onClick={() => setPage(p => p + 1)}
+                          >
+                            NEXT
+                            <ChevronRight className="size-3 ml-1" />
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-[10px] font-mono"
-                          disabled={page === 1}
-                          onClick={() => setPage(p => p - 1)}
-                        >
-                          <ChevronLeft className="size-3 mr-1" />
-                          PREV
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-[10px] font-mono"
-                          disabled={page >= Math.ceil(inventory.items.length / PAGE_SIZE)}
-                          onClick={() => setPage(p => p + 1)}
-                        >
-                          NEXT
-                          <ChevronRight className="size-3 ml-1" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          </div>
 
-        {/* Point Cloud Inspector — right sidebar. Hidden entirely when no
+          {/* Point Cloud Inspector — right sidebar. Hidden entirely when no
             pile has volume data; the left column stretches full-width. */}
-        {hasInventoryData && (
-        <div className="col-span-4 flex flex-col gap-4">
-          <Card className="rounded-sm ring-0 gap-0 py-0 overflow-hidden">
-            <div className="px-4 py-3 border-b">
-              <span className="text-destructive text-[10px] uppercase tracking-wider font-medium">Point Cloud</span>
-              <h3 className="text-foreground text-sm font-bold uppercase tracking-wider mt-1">
-                Inspector
-              </h3>
-            </div>
-            {/* Live 3D extruded-polygon preview of the selected pile.
+          {hasInventoryData && (
+            <div className="col-span-4 flex flex-col gap-4">
+              <Card className="rounded-sm ring-0 gap-0 py-0 overflow-hidden">
+                <div className="px-4 py-3 border-b">
+                  <span className="text-destructive text-[10px] uppercase tracking-wider font-medium">Point Cloud</span>
+                  <h3 className="text-foreground text-sm font-bold uppercase tracking-wider mt-1">
+                    Inspector
+                  </h3>
+                </div>
+                {/* Live 3D extruded-polygon preview of the selected pile.
                 Height = volume / area (the volumetric mean); footprint
                 is the real polygon from measurements.geom. */}
-            <div className="relative aspect-[4/3] bg-secondary overflow-hidden">
-              {selectedItem ? (
-                <StockpileMeshPreview item={selectedItem} />
-              ) : (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
-                    Select a stockpile
-                  </span>
+                <div className="relative aspect-[4/3] bg-secondary overflow-hidden">
+                  {selectedItem ? (
+                    <StockpileMeshPreview item={selectedItem} />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="text-muted-foreground text-[10px] uppercase tracking-wider font-mono">
+                        Select a stockpile
+                      </span>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-            <div className="px-4 py-3 flex flex-col gap-2">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Footprint</span>
-                <span className="text-foreground/80 text-xs font-mono">
-                  {selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number | null) != null 
-                    ? `${formatNum((selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number)))!} m²` 
-                    : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Mean height</span>
-                <span className="text-foreground/80 text-xs font-mono">
-                  {selectedItem?.volume_m3 != null &&
-                    (selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number | null)) != null &&
-                    (selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number)) > 0
-                    ? `${formatNum(selectedItem.volume_m3 / (selectedItem.area_m2 ?? (selectedItem?.properties?.area_m2 as number)))} m`
-                    : (selectedItem?.properties?.mean_height_m as number | null) != null
-                      ? `${formatNum(selectedItem?.properties?.mean_height_m as number)} m`
-                      : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Volume</span>
-                <span className="text-foreground/80 text-xs font-mono">
-                  {selectedItem?.volume_m3 != null ? `${formatNum(selectedItem.volume_m3)} m³` : "—"}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Tonnage</span>
-                <span className="text-foreground/80 text-xs font-mono">
-                  {selectedItem?.tonnage != null ? `${formatNum(selectedItem.tonnage)} t` : "—"}
-                </span>
-              </div>
-            </div>
-          </Card>
-
-          {(() => {
-            const activeSurvey = surveys?.find((s) => s.id === surveyId);
-            const metadata = activeSurvey?.metadata as Record<string, any> | null;
-            const rms = metadata?.rms_error_m;
-            const gcp = metadata?.gcp_residual_m;
-            const classification = metadata?.classification ?? activeSurvey?.status;
-
-            if (!rms && !gcp && !classification) return null;
-
-            return (
-              <Card className="rounded-sm ring-0 gap-0 py-0">
-                <CardHeader className="px-6 py-3 border-b">
-                  <CardTitle className="text-muted-foreground text-[10px] uppercase tracking-wider font-medium">
-                    Quality Metrics
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="flex flex-col gap-2">
-                    {rms != null && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground text-[10px] uppercase tracking-wider">RMS Error</span>
-                        <span className="text-success text-xs font-mono">{rms.toFixed(3)} m</span>
-                      </div>
-                    )}
-                    {gcp != null && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground text-[10px] uppercase tracking-wider">GCP Residual</span>
-                        <span className="text-success text-xs font-mono">{gcp.toFixed(3)} m</span>
-                      </div>
-                    )}
-                    {classification && (
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Classification</span>
-                        <Badge variant="active">{String(classification).toUpperCase()}</Badge>
-                      </div>
-                    )}
+                <div className="px-4 py-3 flex flex-col gap-2">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Footprint</span>
+                    <span className="text-foreground/80 text-xs font-mono">
+                      {selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number | null) != null
+                        ? `${formatNum((selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number)))!} m²`
+                        : "—"}
+                    </span>
                   </div>
-                </CardContent>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Mean height</span>
+                    <span className="text-foreground/80 text-xs font-mono">
+                      {selectedItem?.volume_m3 != null &&
+                        (selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number | null)) != null &&
+                        (selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number)) > 0
+                        ? `${formatNum(selectedItem.volume_m3 / (selectedItem.area_m2 ?? (selectedItem?.properties?.area_m2 as number)))} m`
+                        : (selectedItem?.properties?.mean_height_m as number | null) != null
+                          ? `${formatNum(selectedItem?.properties?.mean_height_m as number)} m`
+                          : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Volume</span>
+                    <span className="text-foreground/80 text-xs font-mono">
+                      {selectedItem?.volume_m3 != null ? `${formatNum(selectedItem.volume_m3)} m³` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Tonnage</span>
+                    <span className="text-foreground/80 text-xs font-mono">
+                      {selectedItem?.tonnage != null ? `${formatNum(selectedItem.tonnage)} t` : "—"}
+                    </span>
+                  </div>
+                </div>
               </Card>
-            );
-          })()}
+
+              {(() => {
+                const activeSurvey = surveys?.find((s) => s.id === surveyId);
+                const metadata = activeSurvey?.metadata as Record<string, any> | null;
+                const rms = metadata?.rms_error_m;
+                const gcp = metadata?.gcp_residual_m;
+                const classification = metadata?.classification ?? activeSurvey?.status;
+
+                if (!rms && !gcp && !classification) return null;
+
+                return (
+                  <Card className="rounded-sm ring-0 gap-0 py-0">
+                    <CardHeader className="px-6 py-3 border-b">
+                      <CardTitle className="text-muted-foreground text-[10px] uppercase tracking-wider font-medium">
+                        Quality Metrics
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                      <div className="flex flex-col gap-2">
+                        {rms != null && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">RMS Error</span>
+                            <span className="text-success text-xs font-mono">{rms.toFixed(3)} m</span>
+                          </div>
+                        )}
+                        {gcp != null && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">GCP Residual</span>
+                            <span className="text-success text-xs font-mono">{gcp.toFixed(3)} m</span>
+                          </div>
+                        )}
+                        {classification && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Classification</span>
+                            <Badge variant="active">{String(classification).toUpperCase()}</Badge>
+                          </div>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
+            </div>
+          )}
         </div>
-        )}
-      </div>
       )}
     </div>
   );
