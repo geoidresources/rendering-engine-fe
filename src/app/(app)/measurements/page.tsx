@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import DataTable from "@/components/ui/DataTable";
@@ -35,6 +36,8 @@ function formatCompact(n: number): string {
   return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }
 
+const PAGE_SIZE = 8;
+
 export default function MeasurementsPage() {
   const { data: projects } = useProjects();
   const projectId = projects?.[0]?.id ?? "";
@@ -43,6 +46,12 @@ export default function MeasurementsPage() {
 
   const { data: inventory, isLoading } = useMeasurementInventory(projectId, surveyId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+
+  // Reset page when survey/project changes
+  useEffect(() => {
+    setPage(1);
+  }, [projectId, surveyId]);
 
   // Gate the whole page on data-presence so we never show a skeleton that
   // never resolves. The auto-select that seeds surveyId can't fire if the
@@ -50,7 +59,10 @@ export default function MeasurementsPage() {
   const hasProjects = !!projects?.length;
   const hasSurveys = !loadingSurveys && !!surveys?.length;
   const hasInventory = !!inventory && inventory.items.length > 0;
-  const hasInventoryData = hasInventory && inventory!.items.some((i) => i.volume_m3 != null);
+  // Loosen the gate: we have "data" if we have any items at all, even if 
+  // they haven't finished volumetric processing yet. This lets the user 
+  // see auto-detected features.
+  const hasInventoryData = hasInventory;
 
   // Auto-select the first pile with a real volume so the preview is
   // never blank on load. Falls back to the very first row if nothing
@@ -97,7 +109,12 @@ export default function MeasurementsPage() {
       label: "Area (M²)",
       mono: true,
       align: "right" as const,
-      render: (val: unknown) => <span>{val != null ? formatNum(val as number) : "—"}</span>,
+      render: (val: unknown, row: Record<string, unknown>) => {
+        // Fallback to properties.area_m2 if top-level is null
+        const item = row as unknown as MeasurementInventoryItem;
+        const area = (val as number | null) ?? (item.properties?.area_m2 as number | null);
+        return <span>{area != null ? formatNum(area) : "—"}</span>;
+      },
     },
     {
       key: "is_locked",
@@ -114,7 +131,8 @@ export default function MeasurementsPage() {
   // was nothing"; a fresh-ingest zero means "we haven't measured yet". They
   // read identically in the UI otherwise, which is the bug operators flagged
   // as "data not wired properly".
-  const stats = hasInventoryData
+  const hasVolumetricData = hasInventory && inventory!.items.some((i) => i.volume_m3 != null);
+  const stats = hasVolumetricData
     ? [
       { title: "Total Inventory", value: `${formatCompact(inventory!.total_volume_m3)} m³`, subtitle: `${formatCompact(inventory!.total_tonnage)} t` },
       { title: "Measured Area", value: `${formatCompact(inventory!.total_area_m2)} m²`, subtitle: "Total coverage" },
@@ -125,7 +143,7 @@ export default function MeasurementsPage() {
       { title: "Total Inventory", value: "—", subtitle: "Awaiting analytics" },
       { title: "Measured Area", value: "—", subtitle: "Awaiting analytics" },
       { title: "Stockpiles", value: "—", subtitle: "Awaiting analytics" },
-      { title: "Total Features", value: "—", subtitle: "Awaiting analytics" },
+      { title: "Total Features", value: String(inventory?.items.length ?? 0), subtitle: "Detected features" },
     ];
 
   return (
@@ -153,7 +171,7 @@ export default function MeasurementsPage() {
                 survey_id: surveyId,
                 coordinates: "",
                 distance_m: null,
-                area_m2: item.area_m2,
+                area_m2: item.area_m2 ?? (item.properties?.area_m2 as number | null),
                 volume_m3: item.volume_m3,
                 created_at: item.created_at,
               }));
@@ -197,13 +215,44 @@ export default function MeasurementsPage() {
               {isLoading ? (
                 <div className="flex items-center justify-center py-20 text-muted-foreground text-xs">Loading inventory...</div>
               ) : (
-                <DataTable
-                  columns={columns}
-                  data={(inventory?.items ?? [])
-                    .filter((item) => item.volume_m3 != null)
-                    .sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0)) as unknown as Record<string, unknown>[]}
-                  onRowClick={(row) => setSelectedId((row as unknown as MeasurementInventoryItem).id)}
-                />
+                <>
+                  <DataTable
+                    columns={columns}
+                    data={(inventory?.items ?? [])
+                      .sort((a, b) => (b.volume_m3 ?? 0) - (a.volume_m3 ?? 0))
+                      .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) as unknown as Record<string, unknown>[]}
+                    onRowClick={(row) => setSelectedId((row as unknown as MeasurementInventoryItem).id)}
+                  />
+                  {inventory && inventory.items.length > PAGE_SIZE && (
+                    <div className="flex items-center justify-between px-4 py-3 border-t border-border-subtle bg-secondary/30">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-mono">
+                        Showing {(page - 1) * PAGE_SIZE + 1} to {Math.min(page * PAGE_SIZE, inventory.items.length)} of {inventory.items.length}
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px] font-mono"
+                          disabled={page === 1}
+                          onClick={() => setPage(p => p - 1)}
+                        >
+                          <ChevronLeft className="size-3 mr-1" />
+                          PREV
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2 text-[10px] font-mono"
+                          disabled={page >= Math.ceil(inventory.items.length / PAGE_SIZE)}
+                          onClick={() => setPage(p => p + 1)}
+                        >
+                          NEXT
+                          <ChevronRight className="size-3 ml-1" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
@@ -238,17 +287,21 @@ export default function MeasurementsPage() {
               <div className="flex justify-between">
                 <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Footprint</span>
                 <span className="text-foreground/80 text-xs font-mono">
-                  {selectedItem?.area_m2 != null ? `${formatNum(selectedItem.area_m2)} m²` : "—"}
+                  {selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number | null) != null 
+                    ? `${formatNum((selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number)))!} m²` 
+                    : "—"}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground text-[10px] uppercase tracking-wider">Mean height</span>
                 <span className="text-foreground/80 text-xs font-mono">
                   {selectedItem?.volume_m3 != null &&
-                    selectedItem?.area_m2 != null &&
-                    selectedItem.area_m2 > 0
-                    ? `${formatNum(selectedItem.volume_m3 / selectedItem.area_m2)} m`
-                    : "—"}
+                    (selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number | null)) != null &&
+                    (selectedItem?.area_m2 ?? (selectedItem?.properties?.area_m2 as number)) > 0
+                    ? `${formatNum(selectedItem.volume_m3 / (selectedItem.area_m2 ?? (selectedItem?.properties?.area_m2 as number)))} m`
+                    : (selectedItem?.properties?.mean_height_m as number | null) != null
+                      ? `${formatNum(selectedItem?.properties?.mean_height_m as number)} m`
+                      : "—"}
                 </span>
               </div>
               <div className="flex justify-between">

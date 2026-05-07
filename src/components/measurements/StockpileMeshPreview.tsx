@@ -160,7 +160,7 @@ export default function StockpileMeshPreview({ item }: Props) {
       const height =
         item.volume_m3 != null && item.area_m2 != null && item.area_m2 > 0
           ? item.volume_m3 / item.area_m2
-          : 0;
+          : (item.properties?.mean_height_m as number) ?? 0;
 
       const positions = Cartesian3.fromDegreesArray(parsed.flat);
 
