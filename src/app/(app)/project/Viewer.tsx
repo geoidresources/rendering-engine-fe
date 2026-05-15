@@ -49,6 +49,8 @@ import { useDrawingHandler } from '@/hooks/useDrawingHandler';
 import { useAnnotationHandler } from '@/hooks/useAnnotationHandler';
 import { useAnnotationLayer } from '@/hooks/useAnnotationLayer';
 import { useDesignOverlayLayer } from '@/hooks/useDesignOverlayLayer';
+import { useTerrainLensLayers } from '@/hooks/useTerrainLensLayers';
+import { useLensStatsRasterLayer } from '@/hooks/useLensStatsRasterLayer';
 import { useAnnotations } from '@/hooks/useAnnotations';
 import { useRecentSurveys } from '@/hooks/useRecentSurveys';
 import { useViewerHotkeys } from '@/hooks/useViewerHotkeys';
@@ -201,6 +203,15 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   useAnnotationHandler(viewerRef);
   useAnnotationLayer(viewerRef);
   useDesignOverlayLayer(viewerRef);
+  // VS Phase 0 — slope / aspect / flow XYZ tile layers driven by
+  // `manifest.terrainLenses`. Hook is a no-op for surveys without
+  // baked lens tiles.
+  useTerrainLensLayers(viewerRef);
+  // VS Phase 0 — overlay the polygon-clipped slope/aspect/flow PNG
+  // (returned by /compute/lens-stats with include_rasters:true) on the
+  // drawn polygon. No-op until the user picks a raster in the
+  // LensStatsSubView's Show-on-map radio.
+  useLensStatsRasterLayer(viewerRef);
   // Global keyboard shortcuts — V/M/D/C/A for tool modes, 1–5 for
   // measure submodes (when a measure tool is active) or right-rail
   // tabs (otherwise). Single window-scoped listener; bails on input
@@ -254,24 +265,102 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
     });
   }, [surveyIdProp, resolvedProjectId, resolvedProjectName, surveyDetail?.survey_date, recordSurveyVisit]);
 
-  // Seed ContextBar store from URL / manifest so the selectors reflect reality.
-  useEffect(() => {
-    if (resolvedProjectId && resolvedProjectId !== siteActiveProjectId) {
-      setSiteActiveProject(resolvedProjectId, resolvedProjectName);
-    }
-    if (surveyIdProp && surveyIdProp !== siteActiveSurveyId) {
-      setSiteActiveSurvey(surveyIdProp);
-    }
-  }, [resolvedProjectId, resolvedProjectName, surveyIdProp, siteActiveProjectId, siteActiveSurveyId, setSiteActiveProject, setSiteActiveSurvey]);
+  // ── URL is the source of truth for the active survey ─────────────────
+  //
+  // Why one-way only: the previous design wired two effects together —
+  // a "seed" effect that pushed URL → siteStore and a "sync" effect that
+  // pushed siteStore → URL — both with `surveyIdProp` AND `siteActiveSurveyId`
+  // in their dep arrays. The result was a race condition on every survey
+  // switch and on every mount where the persisted siteStore disagreed
+  // with the URL:
+  //
+  //   1. User clicks "6 Feb 2024" in the dropdown → setActiveSurvey(Feb)
+  //      mutates the store synchronously.
+  //   2. React renders. URL is still May, store is Feb. The seed effect
+  //      reads URL (May) and writes it back to the store — reverting the
+  //      click — while the sync effect reads store (Feb) and pushes the
+  //      URL to Feb. Both happen in the same commit because each effect
+  //      reads only the closure value, not the queued state update.
+  //   3. State ping-pongs across several renders. Symptoms: the dropdown
+  //      briefly shows two surveys as selected (BaseUI Select tracks the
+  //      transient mismatch), the manifest is fetched multiple times, and
+  //      sometimes the viewer fails to switch at all because the revert
+  //      lands after the URL change has already triggered a manifest load.
+  //
+  // The fix is to make ONE direction canonical. The URL is the natural
+  // choice because it survives reloads, is shareable, and back/forward
+  // navigation already updates it. The dropdown's `onValueChange` now
+  // navigates directly via `router.replace`; the store only follows.
+  // Without an opposing effect there is no race.
+  //
+  // The dropdown component (`ContextBar`) writes to siteStore through
+  // `setActiveSurvey`, so the seed effect below still has to translate
+  // those clicks into URL changes. To do that without re-introducing the
+  // race, we detect store changes through a ref-tracked "previous store
+  // value" — only a delta from inside the dropdown reaches the router
+  // call, never the URL → store seeding that happens on mount.
 
-  // When ContextBar epoch selector changes, push a new URL so Viewer re-enters with that survey.
+  // URL → siteStore (one-way). Ref-guarded so the effect is a no-op when
+  // it re-renders because `siteActiveSurveyId` changed (which we omit
+  // from the deps to avoid reading the closure). Without the guard, this
+  // effect would otherwise revert dropdown clicks: after the user picks
+  // Feb the store is Feb, but the URL is still May, so a naive seed
+  // would call setSiteActiveSurvey(May) and undo the click. The ref
+  // tracks the last URL value we propagated, so only genuine URL
+  // changes (back/forward, manual edit) trigger seeding.
+  const lastSeededProjectIdRef = useRef<string | null>(null);
+  const lastSeededSurveyIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (resolvedProjectId !== lastSeededProjectIdRef.current) {
+      lastSeededProjectIdRef.current = resolvedProjectId;
+      if (resolvedProjectId && resolvedProjectId !== siteActiveProjectId) {
+        setSiteActiveProject(resolvedProjectId, resolvedProjectName);
+      }
+    }
+    if (surveyIdProp !== lastSeededSurveyIdRef.current) {
+      lastSeededSurveyIdRef.current = surveyIdProp;
+      if (surveyIdProp && surveyIdProp !== siteActiveSurveyId) {
+        setSiteActiveSurvey(surveyIdProp);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedProjectId, resolvedProjectName, surveyIdProp]);
+
+  // siteStore → URL (one-way, dropdown clicks only). When the user picks
+  // a survey in the ContextBar, the store moves to a value that no URL
+  // change has yet produced — `lastUrlSyncedSurveyRef` won't hold it.
+  // We push it into the URL and update the ref. When the URL change
+  // propagates back through the seed effect above and into the store,
+  // the ref already matches, so this effect early-returns and no loop
+  // forms.
+  //
+  // Initialised lazily to `null` so the very first render — where the
+  // store may be hydrated from localStorage with a different value than
+  // the URL — does NOT push the persisted store value over the explicit
+  // URL the user just navigated to. The seed effect catches the URL
+  // and updates the store; once that lands, this effect's ref check
+  // matches and it stops.
+  const lastUrlSyncedSurveyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!siteActiveSurveyId) return;
-    if (siteActiveSurveyId === surveyIdProp) return;
+    if (lastUrlSyncedSurveyRef.current === null) {
+      // First commit: trust the URL. Seed effect will reconcile the
+      // store; we just record that we've now seen this store value.
+      lastUrlSyncedSurveyRef.current = siteActiveSurveyId;
+      return;
+    }
+    if (siteActiveSurveyId === lastUrlSyncedSurveyRef.current) return;
+    if (siteActiveSurveyId === surveyIdProp) {
+      // Store caught up to URL via the seed effect — no push needed.
+      lastUrlSyncedSurveyRef.current = siteActiveSurveyId;
+      return;
+    }
+    lastUrlSyncedSurveyRef.current = siteActiveSurveyId;
     const params = new URLSearchParams(searchParams?.toString() ?? '');
     params.set('surveyId', siteActiveSurveyId);
     router.replace(`/project?${params.toString()}`);
-  }, [siteActiveSurveyId, surveyIdProp, router, searchParams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [siteActiveSurveyId, surveyIdProp]);
 
   // V-COMPARE-05: Sync active survey with compare epochs.
   // When the user clicks a dot in the timeline or picks a survey in the top bar,

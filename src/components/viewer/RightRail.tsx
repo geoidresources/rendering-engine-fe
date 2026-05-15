@@ -38,6 +38,12 @@ import { BookmarksPanel } from '@/components/viewer/BookmarksPanel';
 import { useViewerThresholdAlerts } from '@/hooks/useViewerThresholdAlerts';
 import { exportMeasurementAsGeoJson } from '@/lib/export/geojsonExport';
 import { exportMeasurementAsCsv, type MeasurementRow } from '@/lib/export/csvExport';
+import {
+  exportMeasurementVector,
+  downloadMeasurementGeoTiff,
+  type VectorExportFormat,
+  type RasterExportSource,
+} from '@/lib/export/vectorExport';
 import { apiClient, unwrapList } from '@/lib/http';
 import type { ListEnvelope } from '@/types/api';
 import StatusChip, { type StatusTone } from '@/components/ui/StatusChip';
@@ -45,8 +51,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { EmptyStateNudge } from './EmptyStateNudge';
 import { MeasurementResultsCard } from './MeasurementResultsCard';
@@ -1099,6 +1107,34 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
         const onExportCsv = () => {
           exportMeasurementAsCsv(measurementToCsvRow(row), `${baseName}.csv`);
         };
+        const onExportVector = (format: VectorExportFormat) => {
+          const ext = format === 'shp' ? 'zip' : format;
+          const filename = `${baseName}.${ext}`;
+          const toastId = toast.loading(`Generating ${format.toUpperCase()}…`);
+          exportMeasurementVector(row.id, format, filename)
+            .then(() => {
+              toast.dismiss(toastId);
+              toast.success(`${format.toUpperCase()} downloaded.`);
+            })
+            .catch(() => {
+              toast.dismiss(toastId);
+              toast.error(`${format.toUpperCase()} export failed.`);
+            });
+        };
+        const hasSurvey = Boolean(row.latest_survey_id);
+        const onExportGeoTiff = (source: RasterExportSource) => {
+          if (!hasSurvey) return;
+          const toastId = toast.loading(`Generating GeoTIFF (${source})…`);
+          downloadMeasurementGeoTiff(row.id, source)
+            .then(() => {
+              toast.dismiss(toastId);
+              toast.success(`GeoTIFF (${source}) ready — downloading.`);
+            })
+            .catch(() => {
+              toast.dismiss(toastId);
+              toast.error(`GeoTIFF export failed — ${source} raster may be unavailable.`);
+            });
+        };
         return (
           <div
             key={row.id}
@@ -1131,7 +1167,7 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
                   </button>
                 }
               />
-              <DropdownMenuContent align="end" className="bg-card border-border-subtle w-44">
+              <DropdownMenuContent align="end" className="bg-card border-border-subtle w-52">
                 <DropdownMenuItem
                   className="text-[11px] uppercase tracking-[0.12em]"
                   onClick={onExportGeoJson}
@@ -1143,6 +1179,53 @@ const SavedRegionsTab: React.FC<{ projectId?: string }> = ({ projectId }) => {
                   onClick={onExportCsv}
                 >
                   Export CSV
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onExportVector('shp')}
+                >
+                  Shapefile (.zip)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onExportVector('kml')}
+                >
+                  KML
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onExportVector('kmz')}
+                >
+                  KMZ
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onExportVector('dxf')}
+                >
+                  DXF
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  disabled={!hasSurvey}
+                  onClick={() => onExportGeoTiff('ortho')}
+                >
+                  GeoTIFF — Ortho clip
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  disabled={!hasSurvey}
+                  onClick={() => onExportGeoTiff('dsm')}
+                >
+                  GeoTIFF — DSM clip
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  disabled={!hasSurvey}
+                  onClick={() => onExportGeoTiff('dtm')}
+                >
+                  GeoTIFF — DTM clip
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

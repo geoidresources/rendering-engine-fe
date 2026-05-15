@@ -14,6 +14,28 @@ export interface Manifest {
   anchors?: Anchor[];
   /** Per-processor status for non-completed assets (pending, running, failed, timed_out). */
   assetStatuses?: AssetStatus[];
+  /**
+   * VS Phase 0 — terrain lens tile URLs derived from the survey's DSM.
+   * Optional; absent for surveys that pre-date the terrain-lens-bake
+   * processor or where the bake hasn't completed yet. The manifest
+   * schema bumps to schemaVersion '2' once any lens is present, but the
+   * viewer treats the field as optional and unconditionally tolerates
+   * v1 (`terrainLenses` undefined).
+   */
+  terrainLenses?: TerrainLenses;
+}
+
+export interface TerrainLenses {
+  slope?: TerrainLensTiles;
+  aspect?: TerrainLensTiles;
+  flow?: TerrainLensTiles;
+}
+
+export interface TerrainLensTiles {
+  url: string;
+  minZoom?: number;
+  maxZoom?: number;
+  bbox?: number[];
 }
 
 export interface AssetStatus {

@@ -73,6 +73,16 @@ export const ToolPalette: React.FC = () => {
   // Phase 2 for the rationale.
   const activeTool = useViewerStore((s) => s.activeTool);
   const setActiveTool = useViewerStore((s) => s.setActiveTool);
+  // Escape is the operator's "close the inspector" gesture — so the
+  // keystroke must tear down whatever inspector state is currently
+  // visible (measurement polygon, profile sample, lens-stats result +
+  // raster overlay). Without these the card stays mounted (its mount
+  // condition is hasMeasurement || hasProfile || hasLensStats) and the
+  // SingleTileImageryProvider in useLensStatsRasterLayer keeps
+  // rendering the slope/aspect/flow gradient over an empty polygon.
+  const clearMeasurement = useViewerStore((s) => s.clearMeasurement);
+  const clearProfile = useViewerStore((s) => s.clearProfile);
+  const clearLensStats = useViewerStore((s) => s.clearLensStats);
   // Right inset has to track the rail width (360 px expanded, 36 px
   // collapsed) so the toolbar doesn't waste space — without this the
   // pill stays pinned ~340 px shy of the canvas edge even after the
@@ -98,18 +108,27 @@ export const ToolPalette: React.FC = () => {
   const measureShape = useViewerStore((s) => s.measureShape);
   const setMeasureShapeStore = useViewerStore((s) => s.setMeasureShape);
 
-  // Esc returns to Select. (Event listener — not setState in effect.)
-  // Kept here (not in `useViewerHotkeys`) on purpose: ToolPalette already
-  // owns "what does Esc do for tools" and registering this in two places
-  // would double-fire `setActiveTool('select')` per keypress.
+  // Esc returns to Select and closes the inspector. (Event listener —
+  // not setState in effect.) Kept here (not in `useViewerHotkeys`) on
+  // purpose: ToolPalette already owns "what does Esc do for tools" and
+  // registering this in two places would double-fire per keypress.
+  //
+  // Closing the inspector means clearing every state slice the card
+  // reads from — clearing only one leaves the card mounted on the other
+  // (e.g. lens-stats result kept the card alive even after the
+  // measurement was wiped, and the lens raster kept rendering). Mirror
+  // of MeasurementResultsCard.handleClear (the X-button on the card).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
+      clearMeasurement();
+      clearProfile();
+      clearLensStats();
       setActiveTool('select');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [setActiveTool]);
+  }, [setActiveTool, clearMeasurement, clearProfile, clearLensStats]);
 
   // Local thin wrapper kept for type-narrowed prop passing into the
   // button below. All routing lives in `activateMode`.

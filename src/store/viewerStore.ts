@@ -14,7 +14,14 @@ export type LayerId =
   | 'heatmap'
   | 'contours'
   | 'annotations'
-  | 'design_overlay';
+  | 'design_overlay'
+  // VS Phase 0 — terrain lens layers (slope / aspect / flow XYZ tiles).
+  // Mutually exclusive at render time (the FE picker enforces "at most
+  // one active"), but each has its own visible/opacity state so the user
+  // can swap without losing per-lens opacity preferences.
+  | 'lens_slope'
+  | 'lens_aspect'
+  | 'lens_flow';
 export type TerrainMode = 'dtm' | 'dsm';
 export type ToolMode =
   | 'select'
@@ -26,7 +33,68 @@ export type ToolMode =
   | 'cross-section'
   | 'annotate';
 export type MeasureShape = 'line' | 'square' | 'polygon';
-export type InspectorDataView = 'distance' | 'area' | 'volume' | 'profile' | 'cross-section';
+export type InspectorDataView = 'distance' | 'area' | 'volume' | 'profile' | 'cross-section' | 'lens-stats';
+
+/**
+ * VS Phase 0 — slope / aspect / flow statistics computed for an
+ * operator-drawn polygon. Result of POST /rendering-engine/surveys/:id/
+ * compute/lens-stats. Stored in the viewer store so the Inspector
+ * card and any future analytics surfaces can read the same payload.
+ *
+ * `status` walks idle → computing → complete | error. The card only
+ * shows numbers when status === 'complete'; the spinner / error chip
+ * is driven by the other two states.
+ */
+export interface LensStatBand {
+  mean: number;
+  min: number;
+  max: number;
+  stddev: number;
+}
+
+export interface LensStatsResult {
+  slope: LensStatBand;
+  aspect: LensStatBand;
+  flow: LensStatBand;
+  aspect_mean_deg: number;
+  aspect_dominant: string;
+  aspect_histogram: Record<string, number>;
+  sample_count: number;
+  area_m2: number;
+  bbox: [number, number, number, number];
+  dsm_source: string;
+  computed_at: string;
+  /** Optional base64 PNGs (one per lens) — populated when the
+   *  request was made with `include_rasters: true`. Each PNG is
+   *  pre-clipped to the polygon (transparent outside) so the FE
+   *  can drop it straight into a Cesium SingleTileImageryProvider
+   *  via a data: URL without an extra HTTP round trip. */
+  slope_png_b64?: string;
+  aspect_png_b64?: string;
+  flow_png_b64?: string;
+  /** Bounding box the PNGs cover (slightly larger than `bbox` due
+   *  to DSM grid-snap padding). Format: [west, south, east, north]. */
+  raster_bbox?: [number, number, number, number];
+}
+
+/** Which lens raster the FE is currently showing as a Cesium imagery
+ *  layer on top of the drawn polygon. `null` means no overlay; the
+ *  card defaults to this until the user explicitly picks one. */
+export type LensRasterChoice = null | 'slope' | 'aspect' | 'flow';
+
+export interface LensStatsState {
+  status: 'idle' | 'computing' | 'complete' | 'error';
+  result: LensStatsResult | null;
+  error: string | null;
+  /** Survey the result was computed for. Cleared when the survey
+   *  changes so a stale result from a different epoch can't surface
+   *  on the new survey's Inspector card. */
+  surveyId: string | null;
+  /** Which raster the user has chosen to overlay on the polygon.
+   *  null = no overlay. Drives the SingleTileImageryProvider in the
+   *  useLensStatsRasterLayer hook. */
+  rasterChoice: LensRasterChoice;
+}
 export type BlendPreset = 'stacked' | 'embedded';
 export type RightRailTab = 'overview' | 'layers' | 'inspector' | 'measurements' | 'compare' | 'bookmarks';
 export type RailRevealReason =
@@ -150,6 +218,14 @@ export interface ViewerState {
   setMeasureShape: (shape: MeasureShape) => void;
   inspectorDataView: InspectorDataView;
   setInspectorDataView: (view: InspectorDataView) => void;
+
+  // VS Phase 0 — slope/aspect/flow for an operator-drawn polygon.
+  // Populated by the LensStatsCard's data-view change handler.
+  lensStats: LensStatsState;
+  setLensStatsStatus: (status: LensStatsState['status'], error?: string | null) => void;
+  setLensStatsResult: (result: LensStatsResult, surveyId: string) => void;
+  clearLensStats: () => void;
+  setLensRasterChoice: (choice: LensRasterChoice) => void;
 
   // Performance Controls
   pointBudget: number;
@@ -389,6 +465,11 @@ const initialLayers: Record<LayerId, LayerState> = {
   annotations: { id: 'annotations', name: 'Annotations', visible: true, opacity: 1, loading: false, error: null },
   // Design overlay is off and empty until the user uploads a file.
   design_overlay: { id: 'design_overlay', name: 'Design Overlay', visible: false, opacity: 0.7, loading: false, error: null },
+  // VS Phase 0 terrain lenses — all three off by default; the Layers
+  // panel "Terrain lens" picker turns at most one on at a time.
+  lens_slope: { id: 'lens_slope', name: 'Slope (lens)', visible: false, opacity: 0.85, loading: false, error: null },
+  lens_aspect: { id: 'lens_aspect', name: 'Aspect (lens)', visible: false, opacity: 0.85, loading: false, error: null },
+  lens_flow: { id: 'lens_flow', name: 'Flow (lens)', visible: false, opacity: 0.85, loading: false, error: null },
 };
 
 // Mine site centre: lon=152.414949, lat=-32.062341
@@ -551,6 +632,16 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
   setMeasureShape: (measureShape) => set({ measureShape }),
   inspectorDataView: 'area',
   setInspectorDataView: (inspectorDataView) => set({ inspectorDataView }),
+
+  lensStats: { status: 'idle', result: null, error: null, surveyId: null, rasterChoice: null },
+  setLensStatsStatus: (status, error = null) =>
+    set((s) => ({ lensStats: { ...s.lensStats, status, error } })),
+  setLensStatsResult: (result, surveyId) =>
+    set((s) => ({ lensStats: { status: 'complete', result, error: null, surveyId, rasterChoice: s.lensStats.rasterChoice } })),
+  clearLensStats: () =>
+    set({ lensStats: { status: 'idle', result: null, error: null, surveyId: null, rasterChoice: null } }),
+  setLensRasterChoice: (rasterChoice) =>
+    set((s) => ({ lensStats: { ...s.lensStats, rasterChoice } })),
 
   pointBudget: 5000000,
   setPointBudget: (budget) => set({ pointBudget: budget }),
@@ -775,6 +866,7 @@ export const useViewerStore = create<ViewerState>((set, get) => ({
       activeTool: 'select',
       measureShape: 'polygon',
       inspectorDataView: 'area',
+      lensStats: { status: 'idle', result: null, error: null, surveyId: null, rasterChoice: null },
       pointBudget: 5000000,
       terrainExaggeration: 1,
       blendPreset: 'stacked',
