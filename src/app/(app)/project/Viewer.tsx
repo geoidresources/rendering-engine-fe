@@ -50,6 +50,7 @@ import { useAnnotationHandler } from '@/hooks/useAnnotationHandler';
 import { useAnnotationLayer } from '@/hooks/useAnnotationLayer';
 import { useDesignOverlayLayer } from '@/hooks/useDesignOverlayLayer';
 import { useTerrainLensLayers } from '@/hooks/useTerrainLensLayers';
+import { useLensStatsRasterLayer } from '@/hooks/useLensStatsRasterLayer';
 import { useAnnotations } from '@/hooks/useAnnotations';
 import { useRecentSurveys } from '@/hooks/useRecentSurveys';
 import { useViewerHotkeys } from '@/hooks/useViewerHotkeys';
@@ -206,6 +207,11 @@ export default function Viewer({ surveyId: surveyIdProp }: ViewerProps) {
   // `manifest.terrainLenses`. Hook is a no-op for surveys without
   // baked lens tiles.
   useTerrainLensLayers(viewerRef);
+  // VS Phase 0 — overlay the polygon-clipped slope/aspect/flow PNG
+  // (returned by /compute/lens-stats with include_rasters:true) on the
+  // drawn polygon. No-op until the user picks a raster in the
+  // LensStatsSubView's Show-on-map radio.
+  useLensStatsRasterLayer(viewerRef);
   // Global keyboard shortcuts — V/M/D/C/A for tool modes, 1–5 for
   // measure submodes (when a measure tool is active) or right-rail
   // tabs (otherwise). Single window-scoped listener; bails on input

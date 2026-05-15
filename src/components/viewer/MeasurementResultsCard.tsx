@@ -66,6 +66,7 @@ import {
   type VolumeBasePlane,
   type InspectorDataView,
 } from '@/store/viewerStore';
+import { computeLensStats } from '@/lib/api/lensStatsApi';
 import {
   computeBearingDeg,
   computeGroundDistanceMeters,
@@ -1515,6 +1516,208 @@ const ProfileSubView: React.FC<{
   );
 };
 
+/* ─────────────────────── lens stats sub-view ─────────────────────── */
+
+/** Format degrees with one decimal + degree sign. */
+function fmtDeg(v: number): string {
+  return `${v.toFixed(1)}°`;
+}
+
+/** Compass direction with degree (e.g., "SW (212°)"). */
+function fmtCompass(bearing: number, label: string): string {
+  return `${label} (${Math.round(bearing)}°)`;
+}
+
+const LensStatsSubView: React.FC<{
+  /** Called when the user clicks a "Show <lens> on map" radio for the
+   *  first time on a polygon that didn't include rasters in its
+   *  original request — triggers a re-fetch with include_rasters:true
+   *  so the PNGs are populated. */
+  onRequestRasters: () => void;
+}> = ({ onRequestRasters }) => {
+  const lensStats = useViewerStore((s) => s.lensStats);
+  const setLensRasterChoice = useViewerStore((s) => s.setLensRasterChoice);
+  const { status, result, error, rasterChoice } = lensStats;
+
+  // The card defaults rasterChoice to null. When the user picks a
+  // lens via radio, we either swap to the already-loaded PNG (cheap)
+  // or fire a request to fetch the rasters (slow path).
+  const hasRasters = !!(result?.slope_png_b64 && result?.aspect_png_b64 && result?.flow_png_b64);
+
+  const handleRasterPick = (next: 'slope' | 'aspect' | 'flow' | null) => {
+    setLensRasterChoice(next);
+    if (next && !hasRasters) onRequestRasters();
+  };
+
+  if (status === 'computing') {
+    return (
+      <div className="text-xs text-text-muted py-2">
+        Computing slope / aspect / flow from DSM…
+        <div className="text-[10px] text-text-muted/70 mt-0.5">
+          First polygon on a survey takes ~3s (DSM download); subsequent are &lt;1s.
+        </div>
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <div className="text-xs text-danger py-2">
+        Compute failed: {error}
+      </div>
+    );
+  }
+
+  if (status !== 'complete' || !result) {
+    return (
+      <div className="text-xs text-text-muted py-2">
+        Pick &quot;Lens stats&quot; after drawing a polygon to compute slope, aspect, and flow.
+      </div>
+    );
+  }
+
+  const confidence =
+    result.sample_count >= 1000
+      ? 'High'
+      : result.sample_count >= 200
+        ? 'Medium'
+        : 'Low';
+
+  return (
+    <div className="space-y-3">
+      {/* Show-on-map radio. None = numbers only; picking slope/aspect/flow
+          places the colored PNG over the polygon as a Cesium imagery
+          layer via useLensStatsRasterLayer. First pick on a polygon that
+          didn't fetch rasters triggers a re-fetch (slow path ~3s); after
+          that, swapping radios is instant because all 3 PNGs are cached. */}
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/40 p-2">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-text-muted mb-1.5">
+          Show on map
+        </div>
+        <div className="flex gap-1.5 text-[11px]">
+          {(
+            [
+              { key: null, label: 'None' },
+              { key: 'slope', label: 'Slope' },
+              { key: 'aspect', label: 'Aspect' },
+              { key: 'flow', label: 'Flow' },
+            ] as const
+          ).map(({ key, label }) => {
+            const active = rasterChoice === key;
+            return (
+              <button
+                key={String(key)}
+                type="button"
+                onClick={() => handleRasterPick(key)}
+                className={
+                  active
+                    ? 'h-6 px-2 rounded-sm bg-accent text-bg-base text-[10px] font-medium'
+                    : 'h-6 px-2 rounded-sm border border-border-subtle bg-bg-elevated text-text-muted text-[10px] hover:text-text-primary'
+                }
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {rasterChoice && !hasRasters && status === 'complete' && (
+          <div className="text-[9px] text-text-muted mt-1">
+            Loading raster overlay…
+          </div>
+        )}
+      </div>
+
+      {/* Slope */}
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/40 p-2">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-text-muted mb-1.5">
+          Slope (from horizontal)
+        </div>
+        <div className="grid grid-cols-4 gap-2 text-[11px]">
+          <Stat label="AVG" value={fmtDeg(result.slope.mean)} />
+          <Stat label="MIN" value={fmtDeg(result.slope.min)} />
+          <Stat label="MAX" value={fmtDeg(result.slope.max)} />
+          <Stat label="SD" value={fmtDeg(result.slope.stddev)} />
+        </div>
+      </div>
+
+      {/* Aspect */}
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/40 p-2">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-text-muted mb-1.5">
+          Aspect (compass bearing of downhill)
+        </div>
+        <div className="flex items-baseline justify-between text-[11px]">
+          <div>
+            <div className="text-text-muted text-[9px]">DOMINANT</div>
+            <div className="text-text-primary text-sm font-medium">
+              {fmtCompass(result.aspect_mean_deg, result.aspect_dominant)}
+            </div>
+          </div>
+          <div className="text-text-muted text-[10px] text-right">
+            range {fmtDeg(result.aspect.min)} – {fmtDeg(result.aspect.max)}
+          </div>
+        </div>
+        {/* Histogram bar */}
+        <div className="mt-2 flex gap-0.5">
+          {(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'] as const).map((dir) => {
+            const total = Object.values(result.aspect_histogram).reduce(
+              (a, b) => a + b,
+              0,
+            );
+            const count = result.aspect_histogram[dir] ?? 0;
+            const pct = total > 0 ? (count / total) * 100 : 0;
+            return (
+              <div key={dir} className="flex-1 flex flex-col items-center gap-0.5">
+                <div className="h-8 w-full bg-bg-surface rounded-sm relative overflow-hidden">
+                  <div
+                    className="absolute bottom-0 left-0 right-0 bg-accent/60"
+                    style={{ height: `${pct}%` }}
+                  />
+                </div>
+                <div className="text-[8px] text-text-muted">{dir}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Flow / TRI */}
+      <div className="rounded-sm border border-border-subtle bg-bg-elevated/40 p-2">
+        <div className="text-[10px] uppercase tracking-[0.12em] text-text-muted mb-1.5">
+          Flow (Terrain Ruggedness Index, m)
+        </div>
+        <div className="grid grid-cols-4 gap-2 text-[11px]">
+          <Stat label="AVG" value={result.flow.mean.toFixed(2)} />
+          <Stat label="MIN" value={result.flow.min.toFixed(2)} />
+          <Stat label="MAX" value={result.flow.max.toFixed(2)} />
+          <Stat label="SD" value={result.flow.stddev.toFixed(2)} />
+        </div>
+        {result.flow.max > 5 && (
+          <div className="text-[10px] text-text-muted mt-1.5">
+            High peak ruggedness — likely drainage / cliff edge inside polygon.
+          </div>
+        )}
+      </div>
+
+      {/* Footer: provenance */}
+      <div className="flex items-center justify-between text-[10px] text-text-muted pt-1">
+        <span>
+          {result.sample_count.toLocaleString()} samples · {(result.area_m2 / 10000).toFixed(2)} ha
+        </span>
+        <span className={confidence === 'High' ? 'text-success' : confidence === 'Medium' ? 'text-warning' : 'text-danger'}>
+          {confidence} confidence
+        </span>
+      </div>
+    </div>
+  );
+};
+
+const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="flex flex-col">
+    <span className="text-[9px] uppercase tracking-wider text-text-muted">{label}</span>
+    <span className="text-text-primary font-medium">{value}</span>
+  </div>
+);
+
 /* ─────────────────────── card shell ─────────────────────── */
 
 // Icon + title derived from the active measurement tool.
@@ -1524,6 +1727,7 @@ const TOOL_META: Record<string, { icon: React.ReactNode; label: string }> = {
   volume: { icon: <Hexagon className="size-4" />, label: 'Volume' },
   profile: { icon: <Mountain className="size-4" />, label: 'Profile' },
   'cross-section': { icon: <Mountain className="size-4" />, label: 'Cross-section' },
+  'lens-stats': { icon: <Compass className="size-4" />, label: 'Lens stats' },
 };
 
 /** Data-view dropdown options for the inspector card. */
@@ -1533,6 +1737,7 @@ const DATA_VIEW_OPTIONS: { value: InspectorDataView; label: string }[] = [
   { value: 'volume', label: 'Volume' },
   { value: 'profile', label: 'Profile' },
   { value: 'cross-section', label: 'Cross-section' },
+  { value: 'lens-stats', label: 'Lens stats (slope/aspect/flow)' },
 ];
 
 export const MeasurementResultsCard: React.FC<Props> = ({
@@ -1549,17 +1754,33 @@ export const MeasurementResultsCard: React.FC<Props> = ({
   const setMeasurement = useViewerStore((s) => s.setMeasurement);
   const recomputeVolume = useViewerStore((s) => s.recomputeVolume);
   const setProfileSamples = useViewerStore((s) => s.setProfileSamples);
+  const manifestSurveyId = useViewerStore((s) => s.manifest?.surveyId ?? null);
+  const lensStats = useViewerStore((s) => s.lensStats);
+  const setLensStatsStatus = useViewerStore((s) => s.setLensStatsStatus);
+  const setLensStatsResult = useViewerStore((s) => s.setLensStatsResult);
+  const clearLensStats = useViewerStore((s) => s.clearLensStats);
 
   const tool = measurement.tool;
   const hasMeasurement =
     tool !== null && measurement.status !== 'idle' && measurement.points.length > 0;
   const hasProfile = profile.samples !== null && profile.samples.length >= 2;
+  const hasLensStats =
+    lensStats.status === 'computing' ||
+    lensStats.status === 'error' ||
+    (lensStats.status === 'complete' && lensStats.result !== null);
 
-  if (!hasMeasurement && !hasProfile) return null;
+  if (!hasMeasurement && !hasProfile && !hasLensStats) return null;
 
   const handleClear = () => {
     clearMeasurement();
     clearProfile();
+    // Lens-stats result and raster overlay belong to the cleared polygon,
+    // so they have to go with it. Without this the SingleTileImageryProvider
+    // in useLensStatsRasterLayer keeps rendering the gradient over an empty
+    // area, and the card itself stays mounted because hasLensStats is still
+    // true (clear measurement → polygon gone, but result.slope_png_b64
+    // still alive → card sticks around showing stale numbers).
+    clearLensStats();
     setActiveTool('select');
   };
 
@@ -1630,6 +1851,47 @@ export const MeasurementResultsCard: React.FC<Props> = ({
       }
       return;
     }
+
+    // Lens stats: send the drawn polygon to the rendering-engine-be
+    // compute endpoint. Requires ≥3 vertices (polygon, not line) and a
+    // resolved manifest survey id (so the BE can pick the right DSM).
+    // The compute is synchronous — typical latency 1–3s on the cold
+    // path (DSM download), <500ms on the cached path.
+    if (next === 'lens-stats') {
+      if (!hasMeasurement || measurement.points.length < 3) {
+        toast.info('Draw a polygon (≥3 vertices) first, then switch to Lens stats.');
+        return;
+      }
+      if (!manifestSurveyId) {
+        toast.error('Survey not loaded yet — wait for the manifest.');
+        return;
+      }
+      const polygon: GeoJSON.Polygon = {
+        type: 'Polygon',
+        coordinates: [
+          [
+            ...measurement.points.map((p) => [p.longitude, p.latitude] as [number, number]),
+            // Close the ring with the first vertex so GDAL doesn't
+            // reject it as an open LineString.
+            [measurement.points[0].longitude, measurement.points[0].latitude],
+          ],
+        ],
+      };
+      setLensStatsStatus('computing');
+      try {
+        const result = await computeLensStats(manifestSurveyId, polygon);
+        setLensStatsResult(result, manifestSurveyId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setLensStatsStatus('error', msg);
+        toast.error('Lens-stats compute failed.', { description: msg });
+      }
+      return;
+    }
+
+    // Clearing lens stats when navigating away keeps the card from
+    // flashing the previous polygon's numbers on a new measurement.
+    if (lensStats.status !== 'idle') clearLensStats();
 
     // If navigating AWAY from profile/cross-section, clear the profile data
     // so the ProfileChart modal closes.
@@ -1721,6 +1983,36 @@ export const MeasurementResultsCard: React.FC<Props> = ({
           samples={profile.samples}
           mode={inspectorDataView === 'cross-section' ? 'cross-section' : 'profile'}
           viewerRef={viewerRef}
+        />
+      )}
+
+      {inspectorDataView === 'lens-stats' && (
+        <LensStatsSubView
+          onRequestRasters={async () => {
+            // User picked a raster but the previous compute returned
+            // numbers-only. Refire the API with include_rasters:true so
+            // the PNGs land in the same store slice.
+            if (!hasMeasurement || measurement.points.length < 3) return;
+            if (!manifestSurveyId) return;
+            const polygon: GeoJSON.Polygon = {
+              type: 'Polygon',
+              coordinates: [
+                [
+                  ...measurement.points.map((p) => [p.longitude, p.latitude] as [number, number]),
+                  [measurement.points[0].longitude, measurement.points[0].latitude],
+                ],
+              ],
+            };
+            setLensStatsStatus('computing');
+            try {
+              const result = await computeLensStats(manifestSurveyId, polygon, { includeRasters: true });
+              setLensStatsResult(result, manifestSurveyId);
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              setLensStatsStatus('error', msg);
+              toast.error('Lens-stats raster fetch failed.', { description: msg });
+            }
+          }}
         />
       )}
     </div>
