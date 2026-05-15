@@ -6,6 +6,16 @@ import type {
   CreateAssetResponse,
   CreateSurveyRequest,
   AssetSvcSurveyResponse,
+  SurveyPoint,
+  CreateSurveyPointRequest,
+  Breakline,
+  CreateBreaklineRequest,
+  SurveySurface,
+  CreateSurveySurfaceRequest,
+  TerrainModifier,
+  CreateTerrainModifierRequest,
+  DesignFeature,
+  CreateDesignFeatureRequest,
 } from "@/types/asset-svc";
 
 export async function getSignedUrl(body: GetSignedUrlRequest): Promise<GetSignedUrlResponse> {
@@ -40,6 +50,136 @@ export async function linkAssetsToSurvey(surveyId: string, assetIds: string[]): 
   await assetSvcClient.post("/asset-svc/api/v1/surveys/" + surveyId + "/assets", {
     survey_asset_ids: assetIds,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Virtual Surveyor parity — Phase 0 domain endpoints
+// ---------------------------------------------------------------------------
+// Match the Gin routes in BE/asset-svc/internal/interfaces/http/{survey_point,
+// breakline,survey_surface,terrain_modifier,design_feature}_handler.go. Bulk
+// create / grid generation paths are reserved for Phase 1+ — the BE returns
+// 501 today.
+
+// --- Survey points ---
+
+export async function listSurveyPoints(surveyId: string): Promise<SurveyPoint[]> {
+  const res = await assetSvcClient.get<SurveyPoint[]>(
+    `/asset-svc/api/v1/survey-points/?survey_id=${encodeURIComponent(surveyId)}`,
+  );
+  return res.data ?? [];
+}
+
+export async function createSurveyPoint(body: CreateSurveyPointRequest): Promise<SurveyPoint> {
+  const res = await assetSvcClient.post<SurveyPoint, CreateSurveyPointRequest>(
+    "/asset-svc/api/v1/survey-points/",
+    body,
+  );
+  return res.data;
+}
+
+export async function getSurveyPoint(id: string): Promise<SurveyPoint> {
+  const res = await assetSvcClient.get<SurveyPoint>(
+    `/asset-svc/api/v1/survey-points/${encodeURIComponent(id)}`,
+  );
+  return res.data;
+}
+
+export async function deleteSurveyPoint(id: string): Promise<void> {
+  await assetSvcClient.delete(`/asset-svc/api/v1/survey-points/${encodeURIComponent(id)}`);
+}
+
+// --- Breaklines ---
+
+export async function listBreaklines(surveyId: string): Promise<Breakline[]> {
+  const res = await assetSvcClient.get<Breakline[]>(
+    `/asset-svc/api/v1/breaklines/?survey_id=${encodeURIComponent(surveyId)}`,
+  );
+  return res.data ?? [];
+}
+
+export async function createBreakline(body: CreateBreaklineRequest): Promise<Breakline> {
+  const res = await assetSvcClient.post<Breakline, CreateBreaklineRequest>(
+    "/asset-svc/api/v1/breaklines/",
+    body,
+  );
+  return res.data;
+}
+
+export async function deleteBreakline(id: string): Promise<void> {
+  await assetSvcClient.delete(`/asset-svc/api/v1/breaklines/${encodeURIComponent(id)}`);
+}
+
+// --- Survey surfaces (TIN) ---
+
+export async function listSurveySurfaces(surveyId: string): Promise<SurveySurface[]> {
+  const res = await assetSvcClient.get<SurveySurface[]>(
+    `/asset-svc/api/v1/surfaces/?survey_id=${encodeURIComponent(surveyId)}`,
+  );
+  return res.data ?? [];
+}
+
+export async function createSurveySurface(body: CreateSurveySurfaceRequest): Promise<SurveySurface> {
+  const res = await assetSvcClient.post<SurveySurface, CreateSurveySurfaceRequest>(
+    "/asset-svc/api/v1/surfaces/",
+    body,
+  );
+  return res.data;
+}
+
+export async function getSurveySurface(id: string): Promise<SurveySurface> {
+  const res = await assetSvcClient.get<SurveySurface>(
+    `/asset-svc/api/v1/surfaces/${encodeURIComponent(id)}`,
+  );
+  return res.data;
+}
+
+export async function recomputeSurveySurface(id: string): Promise<SurveySurface> {
+  const res = await assetSvcClient.post<SurveySurface>(
+    `/asset-svc/api/v1/surfaces/${encodeURIComponent(id)}/recompute`,
+  );
+  return res.data;
+}
+
+// --- Terrain modifiers ---
+
+export async function listTerrainModifiers(surveyId: string): Promise<TerrainModifier[]> {
+  const res = await assetSvcClient.get<TerrainModifier[]>(
+    `/asset-svc/api/v1/terrain-modifiers/?survey_id=${encodeURIComponent(surveyId)}`,
+  );
+  return res.data ?? [];
+}
+
+export async function createTerrainModifier(body: CreateTerrainModifierRequest): Promise<TerrainModifier> {
+  const res = await assetSvcClient.post<TerrainModifier, CreateTerrainModifierRequest>(
+    "/asset-svc/api/v1/terrain-modifiers/",
+    body,
+  );
+  return res.data;
+}
+
+export async function deleteTerrainModifier(id: string): Promise<void> {
+  await assetSvcClient.delete(`/asset-svc/api/v1/terrain-modifiers/${encodeURIComponent(id)}`);
+}
+
+// --- Design features ---
+
+export async function listDesignFeatures(surveyId: string): Promise<DesignFeature[]> {
+  const res = await assetSvcClient.get<DesignFeature[]>(
+    `/asset-svc/api/v1/design-features/?survey_id=${encodeURIComponent(surveyId)}`,
+  );
+  return res.data ?? [];
+}
+
+export async function createDesignFeature(body: CreateDesignFeatureRequest): Promise<DesignFeature> {
+  const res = await assetSvcClient.post<DesignFeature, CreateDesignFeatureRequest>(
+    "/asset-svc/api/v1/design-features/",
+    body,
+  );
+  return res.data;
+}
+
+export async function deleteDesignFeature(id: string): Promise<void> {
+  await assetSvcClient.delete(`/asset-svc/api/v1/design-features/${encodeURIComponent(id)}`);
 }
 
 export function uploadToGCS(

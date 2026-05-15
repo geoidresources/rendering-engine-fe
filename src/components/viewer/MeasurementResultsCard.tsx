@@ -43,6 +43,7 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Compass,
+  Download,
   Hexagon,
   Layers as LayersIcon,
   Mountain,
@@ -103,6 +104,21 @@ import {
 } from '@/lib/viewer/terrainRmse';
 import { ProvenanceFooter } from './ProvenanceFooter';
 import { cn } from '@/lib/utils';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { exportMeasurementAsGeoJson } from '@/lib/export/geojsonExport';
+import { exportMeasurementAsCsv, type MeasurementRow } from '@/lib/export/csvExport';
+import {
+  exportInlineVector,
+  exportInlineGeoTiff,
+  type VectorExportFormat,
+  type RasterExportSource,
+} from '@/lib/export/vectorExport';
 
 interface Props {
   projectId: string | null | undefined;
@@ -649,6 +665,107 @@ const VolumeSubView: React.FC<{
     });
   };
 
+  // Build a closed-ring GeoJSON Polygon from the current vertices. Mirrors
+  // SaveRegionModal.tsx's serialization so a downloaded file matches what
+  // would have been saved to the BE if the operator clicked Save instead.
+  const buildInlinePolygon = (): Record<string, unknown> | null => {
+    if (points.length < 3) return null;
+    const ring: [number, number][] = points.map((v) => [v.longitude, v.latitude]);
+    ring.push(ring[0]);
+    return { type: 'Polygon', coordinates: [ring] };
+  };
+
+  // Auto-generated name + filename base — same pattern as Save-as-stockpile
+  // suggestion so the downloaded file is recognisable next to a saved row.
+  const inlineName = `Stockpile ${new Date().toISOString().slice(5, 16).replace('T', ' ')}`;
+  const inlineSlug = inlineName.toLowerCase().replace(/[^a-z0-9-]+/g, '_').replace(/^_|_$/g, '');
+
+  const onInlineExportGeoJson = () => {
+    const geom = buildInlinePolygon();
+    if (!geom) return;
+    exportMeasurementAsGeoJson(
+      {
+        id: 'inline',
+        name: inlineName,
+        feature_type: 'stockpile',
+        geojson: geom,
+        properties: {
+          material,
+          area_m2: measurement.areaSquareMeters ?? null,
+          volume_m3: measurement.volumeCubicMeters ?? null,
+        },
+        material_type: material,
+        area_m2: measurement.areaSquareMeters ?? null,
+        volume_m3: measurement.volumeCubicMeters ?? null,
+      },
+      `${inlineSlug}.geojson`,
+    );
+  };
+
+  const onInlineExportCsv = () => {
+    const geom = buildInlinePolygon();
+    if (!geom) return;
+    const row: MeasurementRow = {
+      id: 'inline',
+      type: 'stockpile',
+      name: inlineName,
+      project_id: projectId ?? '',
+      survey_id: activeSurveyId ?? '',
+      coordinates: JSON.stringify((geom as { coordinates: unknown }).coordinates),
+      distance_m: null,
+      area_m2: measurement.areaSquareMeters ?? null,
+      volume_m3: measurement.volumeCubicMeters ?? null,
+      created_at: new Date().toISOString(),
+    };
+    exportMeasurementAsCsv(row, `${inlineSlug}.csv`);
+  };
+
+  const onInlineVector = (format: VectorExportFormat) => {
+    const geom = buildInlinePolygon();
+    if (!geom) {
+      toast.error('Draw at least 3 points to export.');
+      return;
+    }
+    const ext = format === 'shp' ? 'zip' : format;
+    const filename = `${inlineSlug}.${ext}`;
+    const toastId = toast.loading(`Generating ${format.toUpperCase()}…`);
+    exportInlineVector(format, geom, inlineName, filename, {
+      material,
+      area_m2: measurement.areaSquareMeters,
+      volume_m3: measurement.volumeCubicMeters,
+    })
+      .then(() => {
+        toast.dismiss(toastId);
+        toast.success(`${format.toUpperCase()} downloaded.`);
+      })
+      .catch(() => {
+        toast.dismiss(toastId);
+        toast.error(`${format.toUpperCase()} export failed.`);
+      });
+  };
+
+  const onInlineGeoTiff = (source: RasterExportSource) => {
+    const geom = buildInlinePolygon();
+    if (!geom) {
+      toast.error('Draw at least 3 points to export.');
+      return;
+    }
+    if (!activeSurveyId) {
+      toast.error('No active survey — open a survey to clip raster data.');
+      return;
+    }
+    const toastId = toast.loading(`Generating GeoTIFF (${source})…`);
+    exportInlineGeoTiff(source, geom, activeSurveyId, inlineName)
+      .then(() => {
+        toast.dismiss(toastId);
+        toast.success(`GeoTIFF (${source}) ready — downloading.`);
+      })
+      .catch(() => {
+        toast.dismiss(toastId);
+        toast.error(`GeoTIFF export failed — ${source} raster may be unavailable.`);
+      });
+  };
+
   // Resolve the density we should use for the in-card tonnage estimate.
   // Server row wins over LUT; the resolver tags the source so the hint
   // badge can surface provenance. Memoised on `material` + the server
@@ -1004,6 +1121,80 @@ const VolumeSubView: React.FC<{
             >
               <Save className="size-3" /> Save as stockpile
             </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <button
+                    type="button"
+                    title="Download this stockpile in a GIS-friendly format"
+                    className="inline-flex items-center gap-1.5 rounded-sm border border-accent/40 bg-accent/10 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-accent hover:bg-accent/20 transition-colors"
+                  >
+                    <Download className="size-3" /> Download
+                  </button>
+                }
+              />
+              <DropdownMenuContent align="end" className="bg-card border-border-subtle w-52">
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={onInlineExportGeoJson}
+                >
+                  Export GeoJSON
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={onInlineExportCsv}
+                >
+                  Export CSV
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onInlineVector('shp')}
+                >
+                  Shapefile (.zip)
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onInlineVector('kml')}
+                >
+                  KML
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onInlineVector('kmz')}
+                >
+                  KMZ
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  onClick={() => onInlineVector('dxf')}
+                >
+                  DXF
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  disabled={!activeSurveyId}
+                  onClick={() => onInlineGeoTiff('ortho')}
+                >
+                  GeoTIFF — Ortho clip
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  disabled={!activeSurveyId}
+                  onClick={() => onInlineGeoTiff('dsm')}
+                >
+                  GeoTIFF — DSM clip
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-[11px] uppercase tracking-[0.12em]"
+                  disabled={!activeSurveyId}
+                  onClick={() => onInlineGeoTiff('dtm')}
+                >
+                  GeoTIFF — DTM clip
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <button
               type="button"
               onClick={handleCompareWithLast}

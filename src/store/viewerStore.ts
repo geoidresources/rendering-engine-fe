@@ -14,7 +14,14 @@ export type LayerId =
   | 'heatmap'
   | 'contours'
   | 'annotations'
-  | 'design_overlay';
+  | 'design_overlay'
+  // VS Phase 0 — terrain lens layers (slope / aspect / flow XYZ tiles).
+  // Mutually exclusive at render time (the FE picker enforces "at most
+  // one active"), but each has its own visible/opacity state so the user
+  // can swap without losing per-lens opacity preferences.
+  | 'lens_slope'
+  | 'lens_aspect'
+  | 'lens_flow';
 export type TerrainMode = 'dtm' | 'dsm';
 export type ToolMode =
   | 'select'
@@ -389,6 +396,11 @@ const initialLayers: Record<LayerId, LayerState> = {
   annotations: { id: 'annotations', name: 'Annotations', visible: true, opacity: 1, loading: false, error: null },
   // Design overlay is off and empty until the user uploads a file.
   design_overlay: { id: 'design_overlay', name: 'Design Overlay', visible: false, opacity: 0.7, loading: false, error: null },
+  // VS Phase 0 terrain lenses — all three off by default; the Layers
+  // panel "Terrain lens" picker turns at most one on at a time.
+  lens_slope: { id: 'lens_slope', name: 'Slope (lens)', visible: false, opacity: 0.85, loading: false, error: null },
+  lens_aspect: { id: 'lens_aspect', name: 'Aspect (lens)', visible: false, opacity: 0.85, loading: false, error: null },
+  lens_flow: { id: 'lens_flow', name: 'Flow (lens)', visible: false, opacity: 0.85, loading: false, error: null },
 };
 
 // Mine site centre: lon=152.414949, lat=-32.062341
