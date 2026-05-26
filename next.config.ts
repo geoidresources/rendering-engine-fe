@@ -27,9 +27,8 @@ const nextConfig: NextConfig = {
   },
   async redirects() {
     return [
-      { source: "/", destination: "/login", permanent: false },
-      { source: "/GEOIDRESOURCES", destination: "/login", permanent: false },
-      { source: "/GEOIDRESOURCES/:path*", destination: "/login", permanent: false },
+      { source: "/GEOIDRESOURCES", destination: "/", permanent: false },
+      { source: "/GEOIDRESOURCES/:path*", destination: "/", permanent: false },
     ];
   },
   webpack(config, { isServer, webpack: webpackApi }) {
