@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
@@ -66,6 +67,14 @@ async function resolveProjectSites(): Promise<SiteLocationProp[]> {
 }
 
 export default function ProjectPage() {
+  return (
+    <Suspense fallback={<ProjectPageFallback />}>
+      <ProjectPageContent />
+    </Suspense>
+  );
+}
+
+function ProjectPageContent() {
   const searchParams = useSearchParams();
   const surveyId = searchParams.get("surveyId") ?? undefined;
   const [sites, setSites] = useState<SiteLocationProp[]>([]);
@@ -86,4 +95,8 @@ export default function ProjectPage() {
       <ProjectsSidebar />
     </div>
   );
+}
+
+function ProjectPageFallback() {
+  return <div className="fixed inset-0 z-40 bg-[#020208]" />;
 }
