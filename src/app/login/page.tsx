@@ -9,6 +9,7 @@ import { loginUser } from "./api";
 import { toast } from "sonner";
 import type { LoginFormErrors } from "./type";
 import { AUTH_TOKEN_KEY, AUTH_SESSION_KEY } from "@/lib/constants";
+import { shouldRedirectToMaintenance } from "@/lib/maintenance";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -46,6 +47,12 @@ export default function LoginPage() {
       setFieldErrors(errs);
       return;
     }
+
+    if (shouldRedirectToMaintenance(email)) {
+      router.replace("/maintenance");
+      return;
+    }
+
     setFieldErrors({});
     loginMutation.mutate({ email, password });
   }

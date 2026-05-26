@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import LeftRail from "@/components/ui/LeftRail";
 import ContextBar from "@/components/ui/ContextBar";
 import CommandMenu from "@/components/ui/CommandMenu";
+import { clearStoredSession, getStoredSession } from "@/lib/auth";
+import { shouldRedirectToMaintenance } from "@/lib/maintenance";
 
 /**
  * Client wrapper for the (app) route group. Owns:
@@ -15,6 +18,7 @@ import CommandMenu from "@/components/ui/CommandMenu";
  * (nav + context bar + palette) on every (app) route.
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [paletteOpen, setPaletteOpen] = useState(false);
 
   useEffect(() => {
@@ -28,6 +32,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  useEffect(() => {
+    const session = getStoredSession();
+    const sessionEmail = session?.user?.email ?? session?.email;
+
+    if (shouldRedirectToMaintenance(sessionEmail)) {
+      clearStoredSession();
+      router.replace("/maintenance");
+    }
+  }, [router]);
 
   return (
     <div className="flex h-screen bg-bg-base overflow-hidden">
