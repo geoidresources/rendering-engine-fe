@@ -186,11 +186,19 @@ export function uploadToGCS(
   signedUrl: string,
   file: File,
   onProgress: (loaded: number, total: number) => void,
+  headers?: Record<string, string>,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", signedUrl, true);
-    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    // GCS signed URLs sign a specific set of headers (notably Content-Type);
+    // when the caller provides them, send exactly those. Otherwise fall back to
+    // the generic octet-stream default for callers that don't sign headers.
+    if (headers && Object.keys(headers).length > 0) {
+      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+    } else {
+      xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    }
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) onProgress(e.loaded, e.total);
